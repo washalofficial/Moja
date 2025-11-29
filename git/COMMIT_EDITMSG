@@ -1,9 +1,0 @@
-Improve file path handling for reliable GitHub synchronization
-
-Sanitize file paths using a new utility function to prevent malformed path errors during GitHub synchronization, and add Vite environment type definitions.
-
-Replit-Commit-Author: Agent
-Replit-Commit-Session-Id: ecd04f93-c288-42d7-a432-9d3b4e07aa9d
-Replit-Commit-Checkpoint-Type: full_checkpoint
-Replit-Commit-Event-Id: f3be300f-c9b3-457b-bb35-af395a235982
-Replit-Commit-Screenshot-Url: https://storage.googleapis.com/screenshot-production-us-central1/7785bca2-e2d1-4f7d-b83a-a742e2dd8551/ecd04f93-c288-42d7-a432-9d3b4e07aa9d/MRWBWPI
