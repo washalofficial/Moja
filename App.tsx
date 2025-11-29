@@ -8,6 +8,7 @@ import { Logger } from './components/Logger';
 import { PrivacyPolicyModal } from './components/PrivacyPolicyModal';
 import { TermsOfServiceModal } from './components/TermsOfServiceModal';
 import { ConsentBanner } from './components/ConsentBanner';
+import { ScriptInjector } from './components/ScriptInjector';
 import { 
   FolderGit2, 
   Github, 
@@ -1305,83 +1306,69 @@ const App: React.FC = () => {
     );
   };
 
-  const AdNativeBanner = ({ label = "Native Ad", placementKey = 'nativeBanner' }: { label?: string, placementKey?: keyof AdsConfig['placements'] }) => {
-    if (!adsConfig.placements?.[placementKey]) return null;
+  const AdNativeBanner = ({ label = "Native Ad", placementKey = 'nativeBanner' }: { label?: string, placementKey?: string }) => {
+    const config = placementAds[placementKey];
+    const hasRawScript = config?.adsterra?.rawScript;
+    const hasZoneId = config?.adsterra?.zoneId;
+    const hasAdSense = config?.adsense?.slotId && config?.adsense?.clientId;
     
-    // Load placement-specific ads from localStorage - re-triggers when adsRefreshTrigger changes
-    const [placementConfig, setPlacementConfig] = useState(() => {
-      const savedPlacementAds = JSON.parse(localStorage.getItem('placement_ads_config') || '{}');
-      return savedPlacementAds[placementKey as string];
-    });
-
-    useEffect(() => {
-      const savedPlacementAds = JSON.parse(localStorage.getItem('placement_ads_config') || '{}');
-      setPlacementConfig(savedPlacementAds[placementKey as string]);
-    }, [placementKey, adsRefreshTrigger]);
+    if (!hasRawScript && !hasZoneId && !hasAdSense) return null;
     
-    let displayContent = null;
-
-    // Show configured placement ads (Adsterra + AdSense if both configured)
-    if (placementConfig) {
-      const adElements = [];
-      
-      // Add Adsterra if configured
-      if (placementConfig.adsterra?.zoneId) {
-        adElements.push(
-          <div key="adsterra" className="flex justify-center">
-            <AsterraAdFrame 
-              zoneId={placementConfig.adsterra.zoneId} 
-              size={placementConfig.adsterra.size} 
-              width={320} 
-              height={100}
-            />
-          </div>
-        );
-      }
-      
-      // Add Google AdSense if configured
-      if (placementConfig.adsense?.slotId && placementConfig.adsense?.clientId) {
-        adElements.push(
-          <div key="adsense" className="flex justify-center">
-            <GoogleAdSenseUnit 
-              clientId={placementConfig.adsense.clientId} 
-              slotId={placementConfig.adsense.slotId}
-              width={320}
-              height={100}
-            />
-          </div>
-        );
-      }
-      
-      if (adElements.length > 0) {
-        displayContent = <div className="space-y-2">{adElements}</div>;
-      }
-    }
-
     return (
-      <div className="w-[320px] h-[100px] bg-slate-900 border border-slate-800 rounded-xl flex items-center justify-center relative overflow-hidden group shadow-md mx-auto my-4 shrink-0">
-        <div className="z-10 text-center w-full">
-          {displayContent ? (
-            displayContent
-          ) : (
-            <>
-              <span className="text-[10px] text-slate-600 uppercase tracking-widest font-semibold block mb-1">{label}</span>
-              <div className="inline-block bg-slate-800 px-2 py-0.5 rounded border border-slate-700/50">
-                 <span className="text-[10px] text-slate-500 font-bold">320x100</span>
-              </div>
-            </>
-          )}
-        </div>
+      <div className="w-full flex justify-center my-4">
+        {hasRawScript ? (
+          <ScriptInjector html={config.adsterra.rawScript!} />
+        ) : hasZoneId ? (
+          <AsterraAdFrame 
+            zoneId={config.adsterra.zoneId} 
+            size={config.adsterra.size} 
+            width={320} 
+            height={100}
+          />
+        ) : hasAdSense ? (
+          <GoogleAdSenseUnit 
+            clientId={config.adsense!.clientId!} 
+            slotId={config.adsense!.slotId!}
+            width={320}
+            height={100}
+          />
+        ) : null}
       </div>
     );
   };
 
   const TwinRectangles = () => {
-    if (!adsConfig.placements?.rectangle1 && !adsConfig.placements?.rectangle2) return null;
+    const config1 = placementAds['rectangle1'];
+    const config2 = placementAds['rectangle2'];
+    const hasRect1 = config1?.adsterra?.rawScript || config1?.adsterra?.zoneId || (config1?.adsense?.slotId && config1?.adsense?.clientId);
+    const hasRect2 = config2?.adsterra?.rawScript || config2?.adsterra?.zoneId || (config2?.adsense?.slotId && config2?.adsense?.clientId);
+    
+    if (!hasRect1 && !hasRect2) return null;
+    
+    const renderAd = (config: typeof config1, key: string) => {
+      if (!config) return null;
+      if (config.adsterra?.rawScript) {
+        return <ScriptInjector html={config.adsterra.rawScript} />;
+      } else if (config.adsterra?.zoneId) {
+        return <AsterraAdFrame zoneId={config.adsterra.zoneId} size={config.adsterra.size} width={300} height={250} />;
+      } else if (config.adsense?.slotId && config.adsense?.clientId) {
+        return <GoogleAdSenseUnit clientId={config.adsense.clientId} slotId={config.adsense.slotId} width={300} height={250} />;
+      }
+      return null;
+    };
+    
     return (
       <div className="w-full my-6 flex flex-col md:flex-row items-center justify-center gap-4 md:gap-8">
-        {(adsConfig.placements?.rectangle1 !== false) && <AdRectangle label="Rectangle 1" placementKey="rectangle1" />}
-        {(adsConfig.placements?.rectangle2 !== false) && <AdRectangle label="Rectangle 2" placementKey="rectangle2" />}
+        {hasRect1 && (
+          <div className="w-[300px] h-[250px] flex items-center justify-center">
+            {renderAd(config1, 'rect1')}
+          </div>
+        )}
+        {hasRect2 && (
+          <div className="w-[300px] h-[250px] flex items-center justify-center">
+            {renderAd(config2, 'rect2')}
+          </div>
+        )}
       </div>
     );
   };
@@ -1531,775 +1518,186 @@ const App: React.FC = () => {
 
   if (showAdminPanel) {
     return (
-      <div className="min-h-screen bg-black text-slate-200 font-sans p-2 sm:p-4 flex flex-col items-center">
-        <div className="w-full max-w-4xl px-2 sm:px-0">
-          <header className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 sm:mb-8 gap-3">
+      <div className="min-h-screen bg-black text-slate-200 font-sans p-4 flex flex-col items-center">
+        <div className="w-full max-w-2xl">
+          {/* Header */}
+          <header className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-3">
-              <div className="bg-amber-600 p-2 rounded-xl shadow-lg">
-                <UserCog className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
+              <div className="bg-amber-600 p-2 rounded-xl">
+                <UserCog className="w-6 h-6 text-white" />
               </div>
-              <h1 className="text-lg sm:text-xl font-bold text-white">Ad Manager</h1>
+              <h1 className="text-xl font-bold text-white">Ad Manager</h1>
             </div>
             <button 
               onClick={() => setShowAdminPanel(false)}
-              className="px-3 sm:px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-xl text-xs sm:text-sm font-medium flex items-center justify-center gap-2 w-full sm:w-auto"
+              className="px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-xl text-sm font-medium flex items-center gap-2"
             >
-              <LogOut className="w-3 h-3 sm:w-4 sm:h-4" /> Exit
+              <LogOut className="w-4 h-4" /> Exit
             </button>
           </header>
 
-          {true && (
-            <div className="space-y-4 sm:space-y-6">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-4">
-                <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
-                  <div className="flex items-center gap-2 mb-2">
-                    <Activity className="w-4 h-4 text-emerald-400" />
-                    <span className="text-xs text-slate-500 uppercase">Status</span>
-                  </div>
-                  <p className="text-lg font-bold text-emerald-400">Active</p>
-                </div>
-                <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
-                  <div className="flex items-center gap-2 mb-2">
-                    <BarChart3 className="w-4 h-4 text-blue-400" />
-                    <span className="text-xs text-slate-500 uppercase">Networks</span>
-                  </div>
-                  <p className="text-lg font-bold text-white">
-                    {(adsConfig.adsterra.enabled ? 1 : 0) + (adsConfig.adsense.enabled ? 1 : 0)}/2
-                  </p>
-                </div>
-                <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
-                  <div className="flex items-center gap-2 mb-2">
-                    <Layers className="w-4 h-4 text-amber-400" />
-                    <span className="text-xs text-slate-500 uppercase">Placements</span>
-                  </div>
-                  <p className="text-lg font-bold text-white">
-                    {Object.values(adsConfig.placements).filter(Boolean).length}/5
-                  </p>
-                </div>
-                <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
-                  <div className="flex items-center gap-2 mb-2">
-                    <DollarSign className="w-4 h-4 text-green-400" />
-                    <span className="text-xs text-slate-500 uppercase">Est. RPM</span>
-                  </div>
-                  <p className="text-lg font-bold text-green-400">$2.50</p>
-                </div>
-              </div>
-            </div>
-          )}
+          {/* Simple Instructions */}
+          <div className="bg-amber-900/30 border border-amber-600 rounded-xl p-4 mb-6">
+            <p className="text-amber-200 text-sm">
+              Paste your ad script in any location below. The ad will appear exactly at that position in your app.
+            </p>
+          </div>
 
-          {true && (
-            <div className="space-y-6">
-              <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 sm:p-6">
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 gap-3">
-                  <div className="flex items-center gap-2 sm:gap-3">
-                    <div className="w-8 h-8 sm:w-10 sm:h-10 bg-blue-500/20 rounded-xl flex items-center justify-center">
-                      <span className="text-blue-400 font-bold text-xs sm:text-sm">G</span>
-                    </div>
-                    <div>
-                      <h3 className="font-bold text-sm sm:text-base text-white">Google AdSense</h3>
-                      <p className="text-xs text-slate-500">Premium ad network</p>
-                    </div>
-                  </div>
-                  <button 
-                    onClick={() => setAdsConfig(prev => ({ ...prev, adsense: { ...prev.adsense, enabled: !prev.adsense.enabled }}))}
-                    className="text-slate-400 hover:text-white"
-                  >
-                    {adsConfig.adsense.enabled ? <ToggleRight className="w-8 h-8 text-emerald-400" /> : <ToggleLeft className="w-8 h-8" />}
-                  </button>
-                </div>
-                {adsConfig.adsense.enabled && (
-                  <div className="space-y-4 pt-4 border-t border-slate-800">
-                    <div>
-                      <label className="block text-sm text-slate-400 mb-1">Client ID</label>
-                      <input 
-                        type="text" 
-                        value={adsConfig.adsense.clientId}
-                        onChange={e => setAdsConfig(prev => ({ ...prev, adsense: { ...prev.adsense, clientId: e.target.value }}))}
-                        placeholder="ca-pub-xxxxxxxxxxxxxxxx"
-                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm"
-                      />
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-                      <div>
-                        <label className="block text-xs sm:text-sm text-slate-400 mb-1">Banner Slot ID</label>
-                        <input 
-                          type="text" 
-                          value={adsConfig.adsense.bannerSlotId}
-                          onChange={e => setAdsConfig(prev => ({ ...prev, adsense: { ...prev.adsense, bannerSlotId: e.target.value }}))}
-                          placeholder="1234567890"
-                          className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2 sm:px-3 py-2 text-xs sm:text-sm"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs sm:text-sm text-slate-400 mb-1">Rectangle Slot ID</label>
-                        <input 
-                          type="text" 
-                          value={adsConfig.adsense.rectangleSlotId}
-                          onChange={e => setAdsConfig(prev => ({ ...prev, adsense: { ...prev.adsense, rectangleSlotId: e.target.value }}))}
-                          placeholder="0987654321"
-                          className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2 sm:px-3 py-2 text-xs sm:text-sm"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 sm:p-6">
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 gap-3">
-                  <div className="flex items-center gap-2 sm:gap-3">
-                    <div className="w-8 h-8 sm:w-10 sm:h-10 bg-amber-500/20 rounded-xl flex items-center justify-center">
-                      <span className="text-amber-400 font-bold text-xs sm:text-sm">A</span>
-                    </div>
-                    <div>
-                      <h3 className="font-bold text-sm sm:text-base text-white">Adsterra</h3>
-                      <p className="text-xs text-slate-500">High CPM network</p>
-                    </div>
-                  </div>
-                  <button 
-                    onClick={() => setAdsConfig(prev => ({ ...prev, adsterra: { ...prev.adsterra, enabled: !prev.adsterra.enabled }}))}
-                    className="text-slate-400 hover:text-white"
-                  >
-                    {adsConfig.adsterra.enabled ? <ToggleRight className="w-8 h-8 text-emerald-400" /> : <ToggleLeft className="w-8 h-8" />}
-                  </button>
-                </div>
-                {adsConfig.adsterra.enabled && (
-                  <div className="space-y-4 pt-4 border-t border-slate-800">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-                      <div>
-                        <label className="block text-xs sm:text-sm text-slate-400 mb-1">Banner Zone ID</label>
-                        <input 
-                          type="text" 
-                          value={adsConfig.adsterra.bannerZoneId}
-                          onChange={e => setAdsConfig(prev => ({ ...prev, adsterra: { ...prev.adsterra, bannerZoneId: e.target.value }}))}
-                          placeholder="Enter Zone ID"
-                          className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2 sm:px-3 py-2 text-xs sm:text-sm"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs sm:text-sm text-slate-400 mb-1">Rectangle Zone ID</label>
-                        <input 
-                          type="text" 
-                          value={adsConfig.adsterra.rectangleZoneId}
-                          onChange={e => setAdsConfig(prev => ({ ...prev, adsterra: { ...prev.adsterra, rectangleZoneId: e.target.value }}))}
-                          placeholder="Enter Zone ID"
-                          className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2 sm:px-3 py-2 text-xs sm:text-sm"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 sm:p-6">
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 gap-3">
-                  <div className="flex items-center gap-2 sm:gap-3">
-                    <div className="w-8 h-8 sm:w-10 sm:h-10 bg-orange-500/20 rounded-xl flex items-center justify-center">
-                      <span className="text-orange-400 font-bold text-xs sm:text-sm">📦</span>
-                    </div>
-                    <div>
-                      <h3 className="font-bold text-sm sm:text-base text-white">Custom Adsterra Iframe Script</h3>
-                      <p className="text-xs text-slate-500">Paste entire ad script below</p>
-                    </div>
-                  </div>
-                  <button 
-                    onClick={() => setAdsConfig(prev => ({ ...prev, customAsterraIframe: { ...prev.customAsterraIframe, enabled: !prev.customAsterraIframe?.enabled }}))}
-                    className="text-slate-400 hover:text-white"
-                  >
-                    {adsConfig.customAsterraIframe?.enabled ? <ToggleRight className="w-8 h-8 text-emerald-400" /> : <ToggleLeft className="w-8 h-8" />}
-                  </button>
-                </div>
-                <div className="space-y-3 pt-4 border-t border-slate-800">
+          {/* Ad Placement Locations */}
+          <div className="space-y-4">
+            {[
+              { key: 'topBanner', label: 'Top Banner', desc: 'Shows at the very top of the app', color: 'purple' },
+              { key: 'rectangle1', label: 'Rectangle Ad 1', desc: 'Shows left side (300x250)', color: 'orange' },
+              { key: 'rectangle2', label: 'Rectangle Ad 2', desc: 'Shows right side (300x250)', color: 'amber' },
+              { key: 'gapAds', label: 'Gap Ad', desc: 'Shows between sections', color: 'cyan' },
+              { key: 'nativeBanner', label: 'Native Banner', desc: 'Shows in content feed', color: 'pink' },
+              { key: 'bottomBanner', label: 'Bottom Banner', desc: 'Shows at the footer', color: 'emerald' },
+              { key: 'popunder', label: 'Popunder Ad', desc: 'Opens in new tab on first click', color: 'red' },
+            ].map(loc => (
+              <div key={loc.key} className={`bg-slate-900 border border-slate-700 rounded-xl p-4`}>
+                <div className="flex items-center justify-between mb-3">
                   <div>
-                    <label className="block text-xs sm:text-sm text-slate-400 mb-2">Paste Your Complete Ad Script Here</label>
-                    <textarea 
-                      value={asterraScriptInput}
-                      onChange={e => setAsterraScriptInput(e.target.value)}
-                      placeholder={'Paste entire script including <script> tags...'}
-                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-300 font-mono h-32 resize-none focus:outline-none focus:ring-2 focus:ring-orange-500"
-                    />
+                    <h3 className="font-bold text-white flex items-center gap-2">
+                      {loc.label}
+                      {placementAds[loc.key]?.adsterra?.rawScript && (
+                        <span className="text-emerald-400 text-sm">Active</span>
+                      )}
+                    </h3>
+                    <p className="text-xs text-slate-400">{loc.desc}</p>
                   </div>
+                </div>
+
+                <textarea 
+                  placeholder={`Paste your ${loc.label} ad script here...`}
+                  value={placementAds[loc.key]?.adsterra?.rawScript || ''}
+                  onChange={(e) => {
+                    setPlacementAds(prev => ({
+                      ...prev,
+                      [loc.key]: {
+                        ...prev[loc.key],
+                        adsterra: {
+                          ...(prev[loc.key]?.adsterra || { zoneId: '', domain: '', size: '', type: '', link: '' }),
+                          rawScript: e.target.value
+                        }
+                      }
+                    }));
+                  }}
+                  className="w-full h-20 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white font-mono resize-none focus:outline-none focus:ring-2 focus:ring-amber-500 mb-3"
+                />
+
+                <div className="flex gap-2">
                   <button 
                     onClick={() => {
-                      const parsed = parseAsterraScript(asterraScriptInput);
-                      if(parsed) {
-                        setAdsConfig(prev => ({ 
-                          ...prev, 
-                          customAsterraIframe: {
-                            enabled: true,
-                            ...parsed,
-                            placementId: '28056701'
-                          }
-                        }));
-                        alert('✅ Script parsed successfully!');
-                        setAsterraScriptInput('');
-                      } else {
-                        alert('❌ Could not parse script. Make sure you pasted the complete script.');
+                      const script = placementAds[loc.key]?.adsterra?.rawScript || '';
+                      if (!script.trim()) {
+                        alert('Please paste a script first');
+                        return;
                       }
+                      localStorage.setItem('placement_ads_config', JSON.stringify(placementAds));
+                      setAdsRefreshTrigger(prev => prev + 1);
+                      alert(`Ad saved to ${loc.label}!`);
                     }}
-                    className="w-full bg-orange-600 hover:bg-orange-500 text-white font-medium py-2 rounded-lg transition-colors text-sm"
+                    className="flex-1 bg-amber-600 hover:bg-amber-500 text-white py-2 rounded-lg font-medium text-sm"
                   >
-                    Parse & Save Script
+                    Save Ad
                   </button>
-                  {adsConfig.customAsterraIframe?.enabled && (
-                    <div className="bg-slate-800 rounded-lg p-3 text-xs text-slate-300 space-y-1">
-                      <p><span className="text-orange-400 font-semibold">Key:</span> {adsConfig.customAsterraIframe.apiKey?.substring(0, 15)}...</p>
-                      <p><span className="text-orange-400 font-semibold">Format:</span> {adsConfig.customAsterraIframe.format}</p>
-                      <p><span className="text-orange-400 font-semibold">Size:</span> {adsConfig.customAsterraIframe.width}x{adsConfig.customAsterraIframe.height}</p>
-                    </div>
+                  {placementAds[loc.key]?.adsterra?.rawScript && (
+                    <button 
+                      onClick={() => {
+                        const updated = { ...placementAds };
+                        if (updated[loc.key]?.adsterra) {
+                          updated[loc.key].adsterra!.rawScript = undefined;
+                        }
+                        localStorage.setItem('placement_ads_config', JSON.stringify(updated));
+                        setPlacementAds(updated);
+                        setAdsRefreshTrigger(prev => prev + 1);
+                        alert(`Ad removed from ${loc.label}`);
+                      }}
+                      className="px-4 bg-red-600 hover:bg-red-500 text-white py-2 rounded-lg font-medium text-sm"
+                    >
+                      Remove
+                    </button>
                   )}
                 </div>
               </div>
+            ))}
+          </div>
 
-              {/* MASTER HEADER */}
-              <div className="bg-gradient-to-r from-amber-900 via-orange-900 to-amber-900 border-2 border-amber-600 rounded-xl p-8 shadow-xl">
-                <h2 className="text-3xl font-bold text-amber-100 mb-2">🎯 UNIFIED AD MANAGER</h2>
-                <p className="text-amber-200">Manage all ad locations from one place • Paste scripts directly • Multiple ads per location</p>
+          {/* Visual Preview */}
+          <div className="mt-6 bg-slate-900 border border-slate-700 rounded-xl p-4">
+            <h3 className="font-bold text-white mb-4">Where Ads Will Show</h3>
+            <div className="bg-slate-950 rounded-lg p-4 space-y-3">
+              <div className="bg-purple-900/30 border border-purple-600 rounded p-2 text-center text-purple-300 text-xs">Top Banner</div>
+              <div className="bg-slate-800 rounded p-3 text-center text-slate-500 text-xs">App Content</div>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="bg-orange-900/30 border border-orange-600 rounded p-2 text-center text-orange-300 text-xs">Rectangle 1</div>
+                <div className="bg-amber-900/30 border border-amber-600 rounded p-2 text-center text-amber-300 text-xs">Rectangle 2</div>
               </div>
-
-              {/* ALL AD LOCATIONS GRID */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {[
-                  { key: 'topBanner', label: '📍 TOP BANNER', size: '320x100', color: 'purple' },
-                  { key: 'rectangle1', label: '📍 RECTANGLE 1', size: '300x250', color: 'orange' },
-                  { key: 'rectangle2', label: '📍 RECTANGLE 2', size: '300x250', color: 'amber' },
-                  { key: 'gapAds', label: '📍 GAP ADS', size: '320x100', color: 'cyan' },
-                  { key: 'nativeBanner', label: '📍 NATIVE BANNER', size: '320x100', color: 'emerald' },
-                  { key: 'bottomBanner', label: '📍 FOOTER BANNER', size: '320x100', color: 'rose' },
-                ].map(loc => (
-                  <div key={loc.key} className={`bg-slate-900 border-2 border-${loc.color}-600 rounded-xl p-6 hover:shadow-lg transition-all`}>
-                    {/* LOCATION HEADER */}
-                    <div className="flex items-center justify-between mb-4">
-                      <div>
-                        <h3 className={`text-lg font-bold text-${loc.color}-300 mb-1`}>{loc.label}</h3>
-                        <p className={`text-xs text-${loc.color}-400`}>{loc.size}</p>
-                      </div>
-                      {placementAds[loc.key]?.adsterra?.rawScript && (
-                        <div className="text-2xl">✅</div>
-                      )}
-                    </div>
-
-                    {/* SCRIPT INPUT */}
-                    <textarea 
-                      placeholder={`Paste Adsterra script for ${loc.label}...`}
-                      value={(locationScriptInput === loc.key) ? '' : (placementAds[loc.key]?.adsterra?.rawScript || '')}
-                      onChange={(e) => {
-                        setSelectedLocationForScript(loc.key);
-                        setLocationScriptInput(e.target.value);
-                      }}
-                      onFocus={() => {
-                        setSelectedLocationForScript(loc.key);
-                        if (!locationScriptInput && placementAds[loc.key]?.adsterra?.rawScript) {
-                          setLocationScriptInput('');
-                        }
-                      }}
-                      className="w-full h-24 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white font-mono resize-none focus:outline-none focus:ring-2 focus:ring-amber-500 mb-3"
-                    />
-
-                    {/* SAVE/DELETE BUTTONS */}
-                    <div className="flex gap-2">
-                      <button 
-                        onClick={() => {
-                          const script = (selectedLocationForScript === loc.key) ? locationScriptInput : (placementAds[loc.key]?.adsterra?.rawScript || '');
-                          if (!script.trim()) {
-                            alert('Please paste a script first');
-                            return;
-                          }
-                          const updated = { ...placementAds };
-                          if (!updated[loc.key]) updated[loc.key] = {};
-                          if (!updated[loc.key].adsterra) updated[loc.key].adsterra = { zoneId: '', domain: '', size: '', type: '', link: '' };
-                          updated[loc.key].adsterra!.rawScript = script;
-                          localStorage.setItem('placement_ads_config', JSON.stringify(updated));
-                          setPlacementAds(updated);
-                          setAdsRefreshTrigger(prev => prev + 1);
-                          if (selectedLocationForScript === loc.key) setLocationScriptInput('');
-                          alert(`✅ Ad saved to ${loc.label}`);
-                        }}
-                        className={`flex-1 bg-amber-600 hover:bg-amber-500 text-white py-2 rounded font-semibold text-sm transition-all`}
-                      >
-                        💾 Save
-                      </button>
-                      {placementAds[loc.key]?.adsterra?.rawScript && (
-                        <button 
-                          onClick={() => {
-                            const updated = { ...placementAds };
-                            if (updated[loc.key]?.adsterra) {
-                              updated[loc.key].adsterra!.rawScript = undefined;
-                            }
-                            localStorage.setItem('placement_ads_config', JSON.stringify(updated));
-                            setPlacementAds(updated);
-                            setAdsRefreshTrigger(prev => prev + 1);
-                            alert(`🗑️ Ad removed from ${loc.label}`);
-                          }}
-                          className="px-3 bg-red-600 hover:bg-red-500 text-white py-2 rounded font-semibold text-sm transition-all"
-                        >
-                          🗑️
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              {/* INFO SECTION */}
-              <div className="bg-blue-900/30 border border-blue-600 rounded-xl p-6">
-                <h4 className="text-blue-300 font-bold mb-2">💡 How to Use</h4>
-                <ul className="text-sm text-blue-200 space-y-1">
-                  <li>✓ Paste your Adsterra script into any location box</li>
-                  <li>✓ Click "Save" to apply it immediately to that location</li>
-                  <li>✓ Click "🗑️" to remove an ad from that location</li>
-                  <li>✓ Add different scripts to different locations for multiple ads</li>
-                  <li>✓ ✅ indicator shows when an ad is active on that location</li>
-                </ul>
-              </div>
-
-              {/* VISUAL MOCKUP SHOWING WHERE ADS APPEAR */}
-              <div className="bg-slate-950 border-2 border-slate-700 rounded-2xl overflow-hidden shadow-2xl">
-                
-                {/* TOP BANNER PLACEHOLDER */}
-                <div className="p-6 space-y-6">
-                  <div 
-                    onClick={() => {
-                      setExpandedPlacement(expandedPlacement === 'topBanner' ? null : 'topBanner');
-                      setExpandedAdType(null);
-                    }}
-                    className="cursor-pointer group"
-                  >
-                    <div className="bg-gradient-to-r from-purple-900 via-indigo-900 to-purple-900 border-2 border-purple-600 rounded-xl p-6 text-center hover:border-purple-400 transition-all transform hover:scale-105">
-                      <p className="text-purple-300 font-bold text-sm">TOP BANNER</p>
-                      <p className="text-purple-400 text-xs mt-1">320x100</p>
-                    </div>
-                    {/* Adsterra & Google AdSense Buttons */}
-                    <div className="grid grid-cols-2 gap-3 mt-3">
-                      <button
-                        onClick={(e) => { e.stopPropagation(); setExpandedPlacement('topBanner'); setExpandedAdType('adsterra'); }}
-                        className={`py-2 rounded-lg font-medium text-xs transition-all flex items-center justify-center gap-1 ${
-                          expandedPlacement === 'topBanner' && expandedAdType === 'adsterra'
-                            ? 'bg-amber-600 text-white'
-                            : 'bg-slate-800 text-slate-300 hover:bg-amber-600 hover:text-white'
-                        }`}
-                      >
-                        🟠 Adsterra
-                      </button>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); setExpandedPlacement('topBanner'); setExpandedAdType('adsense'); }}
-                        className={`py-2 rounded-lg font-medium text-xs transition-all flex items-center justify-center gap-1 ${
-                          expandedPlacement === 'topBanner' && expandedAdType === 'adsense'
-                            ? 'bg-blue-600 text-white'
-                            : 'bg-slate-800 text-slate-300 hover:bg-blue-600 hover:text-white'
-                        }`}
-                      >
-                        🔵 AdSense
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* TWIN RECTANGLES PLACEHOLDER */}
-                  <div 
-                    onClick={() => {
-                      setExpandedPlacement(expandedPlacement === 'twinRectangles' ? null : 'twinRectangles');
-                      setExpandedAdType(null);
-                    }}
-                    className="cursor-pointer group"
-                  >
-                    <div className="grid grid-cols-2 gap-4 mb-3">
-                      <div className="bg-gradient-to-r from-orange-900 via-red-900 to-orange-900 border-2 border-orange-600 rounded-xl p-8 text-center hover:border-orange-400 transition-all transform hover:scale-105">
-                        <p className="text-orange-300 font-bold text-xs">AD 1</p>
-                        <p className="text-orange-400 text-[10px] mt-1">300x250</p>
-                      </div>
-                      <div className="bg-gradient-to-r from-orange-900 via-red-900 to-orange-900 border-2 border-orange-600 rounded-xl p-8 text-center hover:border-orange-400 transition-all transform hover:scale-105">
-                        <p className="text-orange-300 font-bold text-xs">AD 2</p>
-                        <p className="text-orange-400 text-[10px] mt-1">300x250</p>
-                      </div>
-                    </div>
-                    <p className="text-slate-400 text-xs text-center mb-3 font-semibold">TWIN RECTANGLES</p>
-                    {/* Adsterra & Google AdSense Buttons */}
-                    <div className="grid grid-cols-2 gap-3">
-                      <button
-                        onClick={(e) => { e.stopPropagation(); setExpandedPlacement('twinRectangles'); setExpandedAdType('adsterra'); }}
-                        className={`py-2 rounded-lg font-medium text-xs transition-all flex items-center justify-center gap-1 ${
-                          expandedPlacement === 'twinRectangles' && expandedAdType === 'adsterra'
-                            ? 'bg-amber-600 text-white'
-                            : 'bg-slate-800 text-slate-300 hover:bg-amber-600 hover:text-white'
-                        }`}
-                      >
-                        🟠 Adsterra
-                      </button>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); setExpandedPlacement('twinRectangles'); setExpandedAdType('adsense'); }}
-                        className={`py-2 rounded-lg font-medium text-xs transition-all flex items-center justify-center gap-1 ${
-                          expandedPlacement === 'twinRectangles' && expandedAdType === 'adsense'
-                            ? 'bg-blue-600 text-white'
-                            : 'bg-slate-800 text-slate-300 hover:bg-blue-600 hover:text-white'
-                        }`}
-                      >
-                        🔵 AdSense
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* GAP ADS PLACEHOLDER */}
-                  <div 
-                    onClick={() => {
-                      setExpandedPlacement(expandedPlacement === 'gapAds' ? null : 'gapAds');
-                      setExpandedAdType(null);
-                    }}
-                    className="cursor-pointer group"
-                  >
-                    <div className="bg-gradient-to-r from-teal-900 via-cyan-900 to-teal-900 border-2 border-teal-600 rounded-xl p-6 text-center hover:border-teal-400 transition-all transform hover:scale-105">
-                      <p className="text-teal-300 font-bold text-sm">GAP ADS</p>
-                      <p className="text-teal-400 text-xs mt-1">320x100 (Between Sections)</p>
-                    </div>
-                    {/* Adsterra & Google AdSense Buttons */}
-                    <div className="grid grid-cols-2 gap-3 mt-3">
-                      <button
-                        onClick={(e) => { e.stopPropagation(); setExpandedPlacement('gapAds'); setExpandedAdType('adsterra'); }}
-                        className={`py-2 rounded-lg font-medium text-xs transition-all flex items-center justify-center gap-1 ${
-                          expandedPlacement === 'gapAds' && expandedAdType === 'adsterra'
-                            ? 'bg-amber-600 text-white'
-                            : 'bg-slate-800 text-slate-300 hover:bg-amber-600 hover:text-white'
-                        }`}
-                      >
-                        🟠 Adsterra
-                      </button>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); setExpandedPlacement('gapAds'); setExpandedAdType('adsense'); }}
-                        className={`py-2 rounded-lg font-medium text-xs transition-all flex items-center justify-center gap-1 ${
-                          expandedPlacement === 'gapAds' && expandedAdType === 'adsense'
-                            ? 'bg-blue-600 text-white'
-                            : 'bg-slate-800 text-slate-300 hover:bg-blue-600 hover:text-white'
-                        }`}
-                      >
-                        🔵 AdSense
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* NATIVE BANNER PLACEHOLDER */}
-                  <div 
-                    onClick={() => {
-                      setExpandedPlacement(expandedPlacement === 'nativeBanner' ? null : 'nativeBanner');
-                      setExpandedAdType(null);
-                    }}
-                    className="cursor-pointer group"
-                  >
-                    <div className="bg-gradient-to-r from-pink-900 via-rose-900 to-pink-900 border-2 border-pink-600 rounded-xl p-6 text-center hover:border-pink-400 transition-all transform hover:scale-105">
-                      <p className="text-pink-300 font-bold text-sm">NATIVE BANNER</p>
-                      <p className="text-pink-400 text-xs mt-1">320x100</p>
-                    </div>
-                    {/* Adsterra & Google AdSense Buttons */}
-                    <div className="grid grid-cols-2 gap-3 mt-3">
-                      <button
-                        onClick={(e) => { e.stopPropagation(); setExpandedPlacement('nativeBanner'); setExpandedAdType('adsterra'); }}
-                        className={`py-2 rounded-lg font-medium text-xs transition-all flex items-center justify-center gap-1 ${
-                          expandedPlacement === 'nativeBanner' && expandedAdType === 'adsterra'
-                            ? 'bg-amber-600 text-white'
-                            : 'bg-slate-800 text-slate-300 hover:bg-amber-600 hover:text-white'
-                        }`}
-                      >
-                        🟠 Adsterra
-                      </button>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); setExpandedPlacement('nativeBanner'); setExpandedAdType('adsense'); }}
-                        className={`py-2 rounded-lg font-medium text-xs transition-all flex items-center justify-center gap-1 ${
-                          expandedPlacement === 'nativeBanner' && expandedAdType === 'adsense'
-                            ? 'bg-blue-600 text-white'
-                            : 'bg-slate-800 text-slate-300 hover:bg-blue-600 hover:text-white'
-                        }`}
-                      >
-                        🔵 AdSense
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* BOTTOM BANNER PLACEHOLDER */}
-                  <div 
-                    onClick={() => {
-                      setExpandedPlacement(expandedPlacement === 'bottomBanner' ? null : 'bottomBanner');
-                      setExpandedAdType(null);
-                    }}
-                    className="cursor-pointer group"
-                  >
-                    <div className="bg-gradient-to-r from-emerald-900 via-green-900 to-emerald-900 border-2 border-emerald-600 rounded-xl p-6 text-center hover:border-emerald-400 transition-all transform hover:scale-105">
-                      <p className="text-emerald-300 font-bold text-sm">BOTTOM BANNER</p>
-                      <p className="text-emerald-400 text-xs mt-1">320x100</p>
-                    </div>
-                    {/* Adsterra & Google AdSense Buttons */}
-                    <div className="grid grid-cols-2 gap-3 mt-3">
-                      <button
-                        onClick={(e) => { e.stopPropagation(); setExpandedPlacement('bottomBanner'); setExpandedAdType('adsterra'); }}
-                        className={`py-2 rounded-lg font-medium text-xs transition-all flex items-center justify-center gap-1 ${
-                          expandedPlacement === 'bottomBanner' && expandedAdType === 'adsterra'
-                            ? 'bg-amber-600 text-white'
-                            : 'bg-slate-800 text-slate-300 hover:bg-amber-600 hover:text-white'
-                        }`}
-                      >
-                        🟠 Adsterra
-                      </button>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); setExpandedPlacement('bottomBanner'); setExpandedAdType('adsense'); }}
-                        className={`py-2 rounded-lg font-medium text-xs transition-all flex items-center justify-center gap-1 ${
-                          expandedPlacement === 'bottomBanner' && expandedAdType === 'adsense'
-                            ? 'bg-blue-600 text-white'
-                            : 'bg-slate-800 text-slate-300 hover:bg-blue-600 hover:text-white'
-                        }`}
-                      >
-                        🔵 AdSense
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* CONFIGURATION FORMS SECTION */}
-              {expandedPlacement && (
-              <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
-                {/* Two buttons: Adsterra | Google AdSense */}
-                <div className="grid grid-cols-2 gap-3 mb-4">
-                  <button
-                    onClick={() => setExpandedAdType('adsterra')}
-                    className={`py-3 rounded-lg font-medium text-sm transition-all flex items-center justify-center gap-2 ${
-                      expandedAdType === 'adsterra'
-                        ? 'bg-amber-600 text-white'
-                        : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-                    }`}
-                  >
-                    🟠 Adsterra
-                  </button>
-                  <button
-                    onClick={() => setExpandedAdType('adsense')}
-                    className={`py-3 rounded-lg font-medium text-sm transition-all flex items-center justify-center gap-2 ${
-                      expandedAdType === 'adsense'
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-                    }`}
-                  >
-                    🔵 Google AdSense
-                  </button>
-                </div>
-
-                    {/* Adsterra Form */}
-                    {expandedAdType === 'adsterra' && (
-                      <div className="space-y-3 p-4 bg-slate-800 rounded-lg border border-slate-700">
-                        <p className="text-sm font-semibold text-white mb-3">Configure Adsterra for {expandedPlacement!.replace(/([A-Z])/g, ' $1').trim()}</p>
-                        
-                        {/* Toggle between Fields and Script Mode */}
-                        <div className="grid grid-cols-2 gap-2 mb-4">
-                          <button
-                            onClick={() => setAsterraInputMode('fields')}
-                            className={`py-2 rounded-lg font-medium text-xs transition-all ${
-                              asterraInputMode === 'fields'
-                                ? 'bg-amber-600 text-white'
-                                : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
-                            }`}
-                          >
-                            📝 Input Fields
-                          </button>
-                          <button
-                            onClick={() => setAsterraInputMode('script')}
-                            className={`py-2 rounded-lg font-medium text-xs transition-all ${
-                              asterraInputMode === 'script'
-                                ? 'bg-amber-600 text-white'
-                                : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
-                            }`}
-                          >
-                            {'<>'} Raw Script
-                          </button>
-                        </div>
-
-                        {/* INPUT FIELDS MODE */}
-                        {asterraInputMode === 'fields' && (
-                          <div className="space-y-3">
-                            <div>
-                              <label className="block text-xs text-slate-400 mb-1">Zone ID</label>
-                              <input 
-                                type="text" 
-                                value={placementAds[expandedPlacement!]?.adsterra?.zoneId || ''}
-                                onChange={e => setPlacementAds(prev => ({
-                                  ...prev,
-                                  [expandedPlacement!]: {...(prev[expandedPlacement!] || {}), adsterra: {...(prev[expandedPlacement!]?.adsterra || {zoneId: '', domain: '', size: '', type: '', link: ''}), zoneId: e.target.value}}
-                                }))}
-                                placeholder="28056701"
-                                className="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-xs text-slate-400 mb-1">Domain</label>
-                              <input 
-                                type="text" 
-                                value={placementAds[expandedPlacement!]?.adsterra?.domain || ''}
-                                onChange={e => setPlacementAds(prev => ({
-                                  ...prev,
-                                  [expandedPlacement!]: {...(prev[expandedPlacement!] || {}), adsterra: {...(prev[expandedPlacement!]?.adsterra || {zoneId: '', domain: '', size: '', type: '', link: ''}), domain: e.target.value}}
-                                }))}
-                                placeholder="0-2ur0g1a2cgsej.janeway.replit.dev"
-                                className="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white"
-                              />
-                            </div>
-                            <div className="grid grid-cols-2 gap-2">
-                              <div>
-                                <label className="block text-xs text-slate-400 mb-1">Size</label>
-                                <select 
-                                  value={placementAds[expandedPlacement!]?.adsterra?.size || ''}
-                                  onChange={e => setPlacementAds(prev => ({
-                                    ...prev,
-                                    [expandedPlacement!]: {...(prev[expandedPlacement!] || {}), adsterra: {...(prev[expandedPlacement!]?.adsterra || {zoneId: '', domain: '', size: '', type: '', link: ''}), size: e.target.value}}
-                                  }))}
-                                  className="w-full bg-slate-700 border border-slate-600 rounded-lg px-2 py-2 text-sm text-white"
-                                >
-                                  <option value="">Select Size</option>
-                                  <option value="300x250">300x250</option>
-                                  <option value="728x90">728x90</option>
-                                  <option value="160x600">160x600</option>
-                                  <option value="320x50">320x50</option>
-                                </select>
-                              </div>
-                              <div>
-                                <label className="block text-xs text-slate-400 mb-1">Type</label>
-                                <select 
-                                  value={placementAds[expandedPlacement!]?.adsterra?.type || ''}
-                                  onChange={e => setPlacementAds(prev => ({
-                                    ...prev,
-                                    [expandedPlacement!]: {...(prev[expandedPlacement!] || {}), adsterra: {...(prev[expandedPlacement!]?.adsterra || {zoneId: '', domain: '', size: '', type: '', link: ''}), type: e.target.value}}
-                                  }))}
-                                  className="w-full bg-slate-700 border border-slate-600 rounded-lg px-2 py-2 text-sm text-white"
-                                >
-                                  <option value="">Select Type</option>
-                                  <option value="iframe">Iframe Sync</option>
-                                  <option value="banner">Banner</option>
-                                  <option value="popunder">Popunder</option>
-                                </select>
-                              </div>
-                            </div>
-                            <div>
-                              <label className="block text-xs text-slate-400 mb-1">Link</label>
-                              <input 
-                                type="text" 
-                                value={placementAds[expandedPlacement!]?.adsterra?.link || ''}
-                                onChange={e => setPlacementAds(prev => ({
-                                  ...prev,
-                                  [expandedPlacement!]: {...(prev[expandedPlacement!] || {}), adsterra: {...(prev[expandedPlacement!]?.adsterra || {zoneId: '', domain: '', size: '', type: '', link: ''}), link: e.target.value}}
-                                }))}
-                                placeholder="https://..."
-                                className="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white"
-                              />
-                            </div>
-                            <button 
-                              onClick={() => {
-                                setPendingSave({type: 'adsterra-fields', data: placementAds[expandedPlacement!]?.adsterra});
-                                setShowLocationSelector(true);
-                              }}
-                              className="w-full bg-amber-600 hover:bg-amber-500 text-white py-2 rounded-lg text-sm font-medium"
-                            >
-                              Save Adsterra
-                            </button>
-                          </div>
-                        )}
-
-                        {/* RAW SCRIPT MODE */}
-                        {asterraInputMode === 'script' && (
-                          <div className="space-y-3">
-                            <div>
-                              <label className="block text-xs text-slate-400 mb-1">Paste Complete Adsterra Script</label>
-                              <textarea 
-                                value={placementAds[expandedPlacement!]?.adsterra?.rawScript || ''}
-                                onChange={e => setPlacementAds(prev => ({
-                                  ...prev,
-                                  [expandedPlacement!]: {...(prev[expandedPlacement!] || {}), adsterra: {...(prev[expandedPlacement!]?.adsterra || {zoneId: '', domain: '', size: '', type: '', link: ''}), rawScript: e.target.value}}
-                                }))}
-                                placeholder="<script async=...>...</script>&#10;<div id=container-...></div>"
-                                className="w-full h-32 bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-xs text-white font-mono resize-none"
-                              />
-                              <p className="text-xs text-slate-500 mt-1">Paste the entire script tag + container div provided by Adsterra</p>
-                            </div>
-                            <button 
-                              onClick={() => {
-                                setPendingSave({type: 'adsterra-raw', data: placementAds[expandedPlacement!]?.adsterra?.rawScript});
-                                setShowLocationSelector(true);
-                              }}
-                              className="w-full bg-amber-600 hover:bg-amber-500 text-white py-2 rounded-lg text-sm font-medium"
-                            >
-                              Save Raw Script
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {/* Google AdSense Form */}
-                    {expandedAdType === 'adsense' && (
-                      <div className="space-y-3 p-4 bg-slate-800 rounded-lg border border-slate-700">
-                        <p className="text-sm font-semibold text-white mb-3">Configure Google AdSense for {expandedPlacement!.replace(/([A-Z])/g, ' $1').trim()}</p>
-                        <div>
-                          <label className="block text-xs text-slate-400 mb-1">Client ID</label>
-                          <input 
-                            type="text" 
-                            value={placementAds[expandedPlacement!]?.adsense?.clientId || ''}
-                            onChange={e => setPlacementAds(prev => ({
-                              ...prev,
-                              [expandedPlacement!]: {...(prev[expandedPlacement!] || {}), adsense: {...(prev[expandedPlacement!]?.adsense || {slotId: '', clientId: '', link: ''}), clientId: e.target.value}}
-                            }))}
-                            placeholder="ca-pub-xxxxxxxxxxxxxxxx"
-                            className="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-xs text-slate-400 mb-1">Slot ID</label>
-                          <input 
-                            type="text" 
-                            value={placementAds[expandedPlacement!]?.adsense?.slotId || ''}
-                            onChange={e => setPlacementAds(prev => ({
-                              ...prev,
-                              [expandedPlacement!]: {...(prev[expandedPlacement!] || {}), adsense: {...(prev[expandedPlacement!]?.adsense || {slotId: '', clientId: '', link: ''}), slotId: e.target.value}}
-                            }))}
-                            placeholder="1234567890"
-                            className="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-xs text-slate-400 mb-1">Link</label>
-                          <input 
-                            type="text" 
-                            value={placementAds[expandedPlacement!]?.adsense?.link || ''}
-                            onChange={e => setPlacementAds(prev => ({
-                              ...prev,
-                              [expandedPlacement!]: {...(prev[expandedPlacement!] || {}), adsense: {...(prev[expandedPlacement!]?.adsense || {slotId: '', clientId: '', link: ''}), link: e.target.value}}
-                            }))}
-                            placeholder="https://..."
-                            className="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white"
-                          />
-                        </div>
-                        <button 
-                          onClick={() => {
-                            localStorage.setItem('placement_ads_config', JSON.stringify(placementAds));
-                            setAdsRefreshTrigger(prev => prev + 1);
-                            alert('✅ Google AdSense saved for ' + expandedPlacement!.replace(/([A-Z])/g, ' $1').trim());
-                          }}
-                          className="w-full bg-blue-600 hover:bg-blue-500 text-white py-2 rounded-lg text-sm font-medium"
-                        >
-                          Save Google AdSense
-                        </button>
-                      </div>
-                    )}
-
-                {/* Show what's configured */}
-                <div className="mt-6 pt-6 border-t border-slate-700 text-xs text-slate-400 space-y-2">
-                  <p className="font-semibold text-white">✅ Configured for {expandedPlacement?.replace(/([A-Z])/g, ' $1').trim()}:</p>
-                  {placementAds[expandedPlacement!]?.adsterra?.zoneId && <p className="text-amber-400">🟠 Adsterra: {placementAds[expandedPlacement!].adsterra.size}</p>}
-                  {placementAds[expandedPlacement!]?.adsense?.slotId && <p className="text-blue-400">🔵 Google AdSense: {placementAds[expandedPlacement!].adsense.slotId}</p>}
-                  {!placementAds[expandedPlacement!]?.adsterra?.zoneId && !placementAds[expandedPlacement!]?.adsense?.slotId && <p className="text-slate-500">No ads configured yet</p>}
-                </div>
-              </div>
-              )}
+              <div className="bg-slate-800 rounded p-3 text-center text-slate-500 text-xs">More Content</div>
+              <div className="bg-cyan-900/30 border border-cyan-600 rounded p-2 text-center text-cyan-300 text-xs">Gap Ad</div>
+              <div className="bg-slate-800 rounded p-3 text-center text-slate-500 text-xs">Content</div>
+              <div className="bg-pink-900/30 border border-pink-600 rounded p-2 text-center text-pink-300 text-xs">Native Banner</div>
+              <div className="bg-emerald-900/30 border border-emerald-600 rounded p-2 text-center text-emerald-300 text-xs">Bottom Banner</div>
+              <div className="bg-red-900/30 border border-red-600 rounded p-2 text-center text-red-300 text-xs">Popunder (on click)</div>
             </div>
-          )}
+          </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-black text-slate-200 font-sans flex flex-col">
+    <div className="min-h-screen bg-black text-slate-200 font-sans flex flex-col" onClick={() => {
+      if (placementAds['popunder']?.adsterra?.rawScript) {
+        const script = placementAds['popunder'].adsterra.rawScript;
+        if (script && !sessionStorage.getItem('popunder_shown')) {
+          sessionStorage.setItem('popunder_shown', 'true');
+          const container = document.createElement('div');
+          // Use a timeout to allow React to render, then inject scripts
+          setTimeout(() => {
+            const temp = document.createElement('div');
+            temp.innerHTML = script;
+            const scripts = temp.querySelectorAll('script');
+            scripts.forEach(oldScript => {
+              const newScript = document.createElement('script');
+              newScript.type = oldScript.getAttribute('type') || 'text/javascript';
+              Array.from(oldScript.attributes).forEach(attr => {
+                if (attr.name !== 'type') {
+                  newScript.setAttribute(attr.name, attr.value);
+                }
+              });
+              if (oldScript.textContent) {
+                newScript.textContent = oldScript.textContent;
+              }
+              container.appendChild(newScript);
+            });
+            // Also add non-script HTML
+            Array.from(temp.childNodes).forEach(node => {
+              if ((node as any).tagName !== 'SCRIPT') {
+                container.appendChild(node.cloneNode(true));
+              }
+            });
+            document.body.appendChild(container);
+          }, 0);
+        }
+      }
+    }}>
+      {/* TOP BANNER AD */}
+      {(placementAds['topBanner']?.adsterra?.rawScript || placementAds['topBanner']?.adsterra?.zoneId) && (
+        <div className="w-full flex justify-center py-2 bg-slate-950">
+          {placementAds['topBanner']?.adsterra?.rawScript ? (
+            <ScriptInjector html={placementAds['topBanner'].adsterra.rawScript} />
+          ) : placementAds['topBanner']?.adsterra?.zoneId ? (
+            <AsterraAdFrame 
+              zoneId={placementAds['topBanner'].adsterra.zoneId} 
+              size={placementAds['topBanner'].adsterra.size} 
+              width={320} 
+              height={100}
+            />
+          ) : null}
+        </div>
+      )}
+
       {!hasConsent && (
         <ConsentBanner 
           onAccept={handleAcceptConsent}
@@ -2917,6 +2315,22 @@ const App: React.FC = () => {
         <div className="mt-8 border-t border-slate-800 pt-8">
            <TwinRectangles />
            <AdNativeBanner label="Footer Native" placementKey="nativeBanner" />
+           
+           {/* BOTTOM BANNER AD */}
+           {(placementAds['bottomBanner']?.adsterra?.rawScript || placementAds['bottomBanner']?.adsterra?.zoneId) && (
+             <div className="w-full flex justify-center py-4">
+               {placementAds['bottomBanner']?.adsterra?.rawScript ? (
+                 <ScriptInjector html={placementAds['bottomBanner'].adsterra.rawScript} />
+               ) : placementAds['bottomBanner']?.adsterra?.zoneId ? (
+                 <AsterraAdFrame 
+                   zoneId={placementAds['bottomBanner'].adsterra.zoneId} 
+                   size={placementAds['bottomBanner'].adsterra.size} 
+                   width={320} 
+                   height={100}
+                 />
+               ) : null}
+             </div>
+           )}
         </div>
 
       </div>
