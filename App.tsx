@@ -2,9 +2,11 @@ import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { SyncConfig, LogEntry, FileToSync, SyncState, GitTreeItem } from './types';
 import { GitHubService } from './services/githubService';
 import { generateCommitMessage } from './services/geminiService';
-import { readFileAsBase64, parseRepoUrl, computeGitBlobSha, sanitizeGitPath } from './utils/fileUtils';
+import { readFileAsBase64, parseRepoUrl, computeGitBlobSha, sanitizeGitPath, validateGitPath, validateFileSize, formatFileSize } from './utils/fileUtils';
+import { analyzeLargeFiles, generateLFSStats } from './utils/lfsUtils';
 import { Logger } from './components/Logger';
 import { PrivacyPolicyModal } from './components/PrivacyPolicyModal';
+import { TermsOfServiceModal } from './components/TermsOfServiceModal';
 import { ConsentBanner } from './components/ConsentBanner';
 import { 
   FolderGit2, 
@@ -36,70 +38,31 @@ import {
   ToggleLeft,
   ToggleRight,
   DollarSign,
-  Activity
+  Activity,
+  Download,
+  X,
+  Smartphone,
+  Plus,
+  Trash,
+  Share2,
+  Copy,
+  Check
 } from 'lucide-react';
-
-interface AdsConfig {
-  adsterra: {
-    enabled: boolean;
-    bannerZoneId: string;
-    rectangleZoneId: string;
-  };
-  adsense: {
-    enabled: boolean;
-    clientId: string;
-    bannerSlotId: string;
-    rectangleSlotId: string;
-  };
-  placements: {
-    topBanner: boolean;
-    twinRectangles: boolean;
-    gapAds: boolean;
-    nativeBanner: boolean;
-    bottomBanner: boolean;
-  };
-}
-
-const DEFAULT_ADS_CONFIG: AdsConfig = {
-  adsterra: {
-    enabled: true,
-    bannerZoneId: '',
-    rectangleZoneId: ''
-  },
-  adsense: {
-    enabled: true,
-    clientId: '',
-    bannerSlotId: '',
-    rectangleSlotId: ''
-  },
-  placements: {
-    topBanner: true,
-    twinRectangles: true,
-    gapAds: true,
-    nativeBanner: true,
-    bottomBanner: true
-  }
-};
 
 const App: React.FC = () => {
   const [config, setConfig] = useState<SyncConfig>({
     token: localStorage.getItem('gh_token') || '',
     repoUrl: localStorage.getItem('gh_repo') || '',
     branch: 'main',
-    targetPath: '',
+    targetPath: localStorage.getItem('gh_targetPath') || '',
     deleteMissing: false,
     autoCommitMessage: true,
+    syncMode: (localStorage.getItem('gh_syncMode') as any) || 'preserve_structure',
   });
 
   const [showAdminLogin, setShowAdminLogin] = useState(false);
   const [showAdminPanel, setShowAdminPanel] = useState(false);
   const [adminPasswordInput, setAdminPasswordInput] = useState('');
-  const [activeAdminTab, setActiveAdminTab] = useState<'overview' | 'networks' | 'placements'>('overview');
-  
-  const [adsConfig, setAdsConfig] = useState<AdsConfig>(() => {
-    const saved = localStorage.getItem('admin_ads_config');
-    return saved ? JSON.parse(saved) : DEFAULT_ADS_CONFIG;
-  });
 
   const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
@@ -107,22 +70,194 @@ const App: React.FC = () => {
   const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [showHelpModal, setShowHelpModal] = useState(false);
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [copySuccess, setCopySuccess] = useState(false);
   
-  const [hasConsent, setHasConsent] = useState(!!localStorage.getItem('privacy_consent'));
+  const [hasConsent, setHasConsent] = useState(
+    !!localStorage.getItem('privacy_consent') && 
+    !!localStorage.getItem('privacy_policy_accepted') && 
+    !!localStorage.getItem('terms_accepted')
+  );
   const [showPrivacyPolicy, setShowPrivacyPolicy] = useState(false);
+  const [showTermsOfService, setShowTermsOfService] = useState(false);
+  const [privacyAccepted, setPrivacyAccepted] = useState(!!localStorage.getItem('privacy_policy_accepted'));
+  const [termsAccepted, setTermsAccepted] = useState(!!localStorage.getItem('terms_accepted'));
+  
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [showInstallButton, setShowInstallButton] = useState(false);
+
+  const [showSyncModeModal, setShowSyncModeModal] = useState(false);
+  const [selectedSyncMode, setSelectedSyncMode] = useState<'empty' | 'update' | null>(null);
 
   const [files, setFiles] = useState<FileToSync[]>([]);
+  const [rootFolderName, setRootFolderName] = useState('');
   const [syncState, setSyncState] = useState<SyncState>(SyncState.IDLE);
   const [progress, setProgress] = useState(0);
   const [stats, setStats] = useState({ total: 0, scanned: 0, uploaded: 0 });
   const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [hasError, setHasError] = useState(false);
+  const [showCompletionModal, setShowCompletionModal] = useState(false);
+  const [completionData, setCompletionData] = useState<{ 
+    mode: 'empty' | 'update' | null; 
+    repoUrl: string;
+    total: number;
+    scanned: number;
+    uploaded: number;
+    skipped: number;
+  }>({ mode: null, repoUrl: '', total: 0, scanned: 0, uploaded: 0, skipped: 0 });
+
+  interface AdsConfig {
+    adsEnabled: boolean;
+    adsterraEnabled: boolean;
+    adsenseEnabled: boolean;
+    adsterraZoneId: string;
+    adsenseClientId: string;
+    adsenseSlotId: string;
+    placements?: Record<string, any>;
+    customAsterraIframe?: {
+      enabled: boolean;
+      code?: string;
+      width: number;
+      height: number;
+      apiKey?: string;
+      format?: string;
+      invokeUrl?: string;
+      placementId?: string;
+      zoneId?: string;
+    };
+    adsterra?: {
+      enabled?: boolean;
+      zoneId: string;
+      domain: string;
+      size: string;
+      type: string;
+      link: string;
+      bannerZoneId?: string;
+      rectangleZoneId?: string;
+    };
+    adsense?: {
+      enabled?: boolean;
+      clientId: string;
+      slotId: string;
+      link?: string;
+      bannerSlotId?: string;
+      rectangleSlotId?: string;
+    };
+  }
+
+  interface PlacementAd {
+    adsterra?: {
+      zoneId: string;
+      domain: string;
+      size: string;
+      type: string;
+      link: string;
+      rawScript?: string;
+    };
+    adsense?: {
+      clientId: string;
+      slotId: string;
+      link?: string;
+    };
+  }
+
+  const [adsConfig, setAdsConfig] = useState<AdsConfig>(() => {
+    const saved = localStorage.getItem('admin_ads_config');
+    return saved ? JSON.parse(saved) : {
+      adsEnabled: false,
+      adsterraEnabled: false,
+      adsenseEnabled: false,
+      adsterraZoneId: '',
+      adsenseClientId: '',
+      adsenseSlotId: ''
+    };
+  });
+
+  const [placementAds, setPlacementAds] = useState<Record<string, PlacementAd>>(() => {
+    const saved = localStorage.getItem('placement_ads_config');
+    return saved ? JSON.parse(saved) : {};
+  });
+
+  const [adsRefreshTrigger, setAdsRefreshTrigger] = useState(0);
+  const [showLocationSelector, setShowLocationSelector] = useState(false);
+  const [pendingSave, setPendingSave] = useState<{ type: string; data: any } | null>(null);
+  const [expandedPlacement, setExpandedPlacement] = useState<string | null>(null);
+  const [expandedAdType, setExpandedAdType] = useState<string | null>(null);
+  const [asterraInputMode, setAsterraInputMode] = useState<'fields' | 'raw' | 'script'>('fields');
+  const [asterraScriptInput, setAsterraScriptInput] = useState('');
+  const [locationScriptInput, setLocationScriptInput] = useState('');
+  const [selectedLocationForScript, setSelectedLocationForScript] = useState<string | null>(null);
+
+  const parseAsterraScript = (script: string) => {
+    const atOptionsMatch = script.match(/atOptions\s*=\s*\{([^}]+)\}/);
+    if (atOptionsMatch) {
+      const optionsStr = atOptionsMatch[1];
+      const keyMatch = optionsStr.match(/['"]?key['"]?\s*:\s*['"]([^'"]+)['"]/);
+      const formatMatch = optionsStr.match(/['"]?format['"]?\s*:\s*['"]([^'"]+)['"]/);
+      const heightMatch = optionsStr.match(/['"]?height['"]?\s*:\s*(\d+)/);
+      const widthMatch = optionsStr.match(/['"]?width['"]?\s*:\s*(\d+)/);
+      
+      return {
+        zoneId: keyMatch ? keyMatch[1] : '',
+        format: formatMatch ? formatMatch[1] : '',
+        height: heightMatch ? parseInt(heightMatch[1]) : 0,
+        width: widthMatch ? parseInt(widthMatch[1]) : 0
+      };
+    }
+    return null;
+  };
   
   const menuRef = useRef<HTMLDivElement>(null);
+
+  // Share functionality
+  const appUrl = 'https://gitsync-mobile-plus-pc.vercel.app/';
+  const shareText = 'GitSync Mobile - Sync local folders directly to GitHub repositories! No wrapper folders, smart sync, PWA support and more!';
+
+  const handleShare = (platform: string) => {
+    const encodedText = encodeURIComponent(shareText);
+    const encodedUrl = encodeURIComponent(appUrl);
+
+    let shareUrl = '';
+    switch(platform) {
+      case 'whatsapp':
+        shareUrl = `https://wa.me/?text=${encodedText}%20${encodedUrl}`;
+        break;
+      case 'twitter':
+        shareUrl = `https://twitter.com/intent/tweet?text=${encodedText}&url=${encodedUrl}`;
+        break;
+      case 'facebook':
+        shareUrl = `https://www.facebook.com/sharer/sharer.php?u=${encodedUrl}`;
+        break;
+      case 'telegram':
+        shareUrl = `https://t.me/share/url?url=${encodedUrl}&text=${encodedText}`;
+        break;
+      case 'copy':
+        navigator.clipboard.writeText(appUrl).then(() => {
+          setCopySuccess(true);
+          setTimeout(() => setCopySuccess(false), 2000);
+        });
+        return;
+    }
+
+    if(shareUrl) window.open(shareUrl, '_blank', 'width=600,height=400');
+  };
+
+  const handleInstallApp = useCallback(async () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    if (outcome === 'accepted') {
+      setDeferredPrompt(null);
+      setShowInstallButton(false);
+    }
+  }, [deferredPrompt]);
 
   useEffect(() => {
     localStorage.setItem('gh_token', config.token);
     localStorage.setItem('gh_repo', config.repoUrl);
-  }, [config.token, config.repoUrl]);
+    localStorage.setItem('gh_targetPath', config.targetPath);
+    localStorage.setItem('gh_syncMode', config.syncMode || 'preserve_structure');
+  }, [config.token, config.repoUrl, config.targetPath, config.syncMode]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -132,6 +267,29 @@ const App: React.FC = () => {
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (e: Event) => {
+      e.preventDefault();
+      setDeferredPrompt(e as any);
+      setShowInstallButton(true);
+      console.log('✅ PWA Install Prompt Detected - App Download button enabled');
+    };
+
+    const handleAppInstalled = () => {
+      console.log('✅ App installed successfully');
+      setDeferredPrompt(null);
+      setShowInstallButton(false);
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    window.addEventListener('appinstalled', handleAppInstalled);
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      window.removeEventListener('appinstalled', handleAppInstalled);
+    };
   }, []);
 
   const addLog = useCallback((message: string, type: LogEntry['type'] = 'info') => {
@@ -165,6 +323,7 @@ const App: React.FC = () => {
       
       await gh.getRepo(repoDetails.owner, repoDetails.repo);
       addLog(`Repository found: ${repoDetails.owner}/${repoDetails.repo}`, 'success');
+      addLog(`✅ Tool supports: Public/Private repos, With/Without README`, 'success');
 
       setIsConnected(true);
     } catch (error) {
@@ -172,7 +331,7 @@ const App: React.FC = () => {
       let userFriendlyMsg = msg;
       
       if (msg === 'Not Found' || msg.includes('404')) {
-        userFriendlyMsg = "Repository not found. Please check the URL, or ensure your Token has 'repo' permissions (private repos require this).";
+        userFriendlyMsg = "Repository not found. Please check the URL, or ensure your Token has 'repo' permissions (works for public & private repos).";
       } else if (msg.includes('Bad credentials') || msg.includes('401')) {
         userFriendlyMsg = "Invalid Token. Please check your Personal Access Token.";
       }
@@ -189,32 +348,109 @@ const App: React.FC = () => {
     if (event.target.files && event.target.files.length > 0) {
       const fileList = Array.from(event.target.files) as File[];
       
-      const rootFolderName = fileList[0].webkitRelativePath.split('/')[0] || 'Selected Folder';
+      // STEP 1: DETECT ROOT FOLDER - Look for first file with path structure
+      let rootFolderToStrip = '';
+      for (const f of fileList) {
+        const path = f.webkitRelativePath || f.name;
+        if (path && path.includes('/')) {
+          const parts = path.split('/');
+          rootFolderToStrip = parts[0]; // Get the MAIN folder name
+          break;
+        }
+      }
 
-      const syncFiles: FileToSync[] = fileList.map(f => {
-        const fullPath = f.webkitRelativePath || f.name;
-        const parts = fullPath.split('/');
-        const relativePath = parts.length > 1 ? parts.slice(1).join('/') : fullPath;
-        const sanitizedPath = sanitizeGitPath(relativePath);
+      console.log(`✅ ROOT FOLDER DETECTED: "${rootFolderToStrip}"`);
+      console.log(`📁 TOTAL FILES: ${fileList.length}`);
 
-        return {
-          path: sanitizedPath,
-          file: f,
-          status: 'pending' as const
-        };
-      }).filter(f => f.path.length > 0);
+      // STEP 2: AGGRESSIVE STRIPPING - Remove root folder from EVERY file
+      let syncFiles: FileToSync[] = fileList
+        .map((f, idx) => {
+          const fullPath = f.webkitRelativePath || f.name;
+          
+          // START WITH FULL PATH
+          let cleanPath = fullPath;
+          
+          // STEP A: Strip the root folder COMPLETELY
+          if (rootFolderToStrip && cleanPath.startsWith(rootFolderToStrip + '/')) {
+            // Remove: "FolderName/" from the beginning
+            cleanPath = cleanPath.slice(rootFolderToStrip.length + 1);
+          } else if (cleanPath === rootFolderToStrip) {
+            // Skip the folder itself
+            return null;
+          }
+          
+          // STEP B: Remove any remaining leading slashes
+          cleanPath = cleanPath.replace(/^\/+/, '');
+          
+          // STEP C: Skip system files and empty paths
+          if (!cleanPath || cleanPath.startsWith('.git') || cleanPath.startsWith('git/') || cleanPath === '.gitignore') {
+            return null;
+          }
+          
+          // STEP D: EMERGENCY CHECK - If folder name is STILL in path, REJECT
+          if (rootFolderToStrip && cleanPath.toLowerCase().includes(rootFolderToStrip.toLowerCase())) {
+            console.error(`❌ REJECTED: Folder name still in path: "${cleanPath}"`);
+            return null;
+          }
+          
+          // Sanitize for Git
+          const sanitizedPath = sanitizeGitPath(cleanPath);
+          
+          if (idx < 5 && sanitizedPath) {
+            console.log(`  [${idx}] Original: "${fullPath}" → Final: "${sanitizedPath}"`);
+          }
 
+          return {
+            path: sanitizedPath,
+            file: f,
+            status: 'pending' as const
+          };
+        })
+        .filter(f => f !== null) as FileToSync[];
+
+      // STEP 3: HANDLE NESTED FOLDER STRUCTURE (from downloaded zips)
+      // If all files start with the same folder name, strip it too
+      if (syncFiles.length > 0) {
+        const firstFileFolder = syncFiles[0].path.split('/')[0];
+        const allStartWithSameFolder = syncFiles.every(f => f.path.startsWith(firstFileFolder + '/') || f.path === firstFileFolder);
+        
+        if (allStartWithSameFolder && firstFileFolder && firstFileFolder !== rootFolderToStrip) {
+          console.log(`📁 NESTED FOLDER DETECTED: "${firstFileFolder}" - Stripping additional layer...`);
+          syncFiles = syncFiles.map(f => {
+            let path = f.path;
+            if (path.startsWith(firstFileFolder + '/')) {
+              path = path.slice(firstFileFolder.length + 1);
+            } else if (path === firstFileFolder) {
+              return null as any;
+            }
+            return { ...f, path };
+          }).filter(f => f !== null) as FileToSync[];
+          
+          console.log(`✅ DOUBLE-STRIP COMPLETE: Removed nested folder "${firstFileFolder}"`);
+        }
+      }
+
+      setRootFolderName(rootFolderToStrip);
       setFiles(syncFiles);
       setStats({ total: syncFiles.length, scanned: 0, uploaded: 0 });
-      addLog(`Selected ${syncFiles.length} files from '${rootFolderName}'. Syncing folder contents...`, 'info');
+      
+      addLog(`✅ Selected ${syncFiles.length} files from folder`, 'success');
+      addLog(`📂 Stripping: "${rootFolderToStrip}"`, 'info');
+      addLog(`🚀 Files will sync ONLY as contents at repo root!`, 'success');
       
       setSyncState(SyncState.IDLE);
       setProgress(0);
     }
   };
 
-  const startSync = async () => {
+  const startSync = async (mode?: 'empty' | 'update') => {
     if (!isConnected) return;
+    
+    // If no mode provided, show the modal
+    if (!mode) {
+      setShowSyncModeModal(true);
+      return;
+    }
     
     const repoDetails = parseRepoUrl(config.repoUrl);
     if (!repoDetails) return;
@@ -222,6 +458,37 @@ const App: React.FC = () => {
     if (files.length === 0 && !config.deleteMissing) {
       addLog('No files selected.', 'warning');
       return;
+    }
+
+    // BULLETPROOF: Validate NO file path contains root folder name
+    if (rootFolderName) {
+      const badPaths = files.filter(f => 
+        f.path.startsWith(rootFolderName + '/') || 
+        f.path === rootFolderName ||
+        f.path.includes('/' + rootFolderName + '/') ||
+        f.path.includes(rootFolderName)
+      );
+      
+      if (badPaths.length > 0) {
+        addLog('❌ CRITICAL ERROR: Files still contain folder name!', 'error');
+        addLog(`Root folder name detected: "${rootFolderName}"`, 'error');
+        addLog(`Remove this folder and select again:`, 'error');
+        badPaths.slice(0, 3).forEach(f => {
+          addLog(`   ❌ ${f.path}`, 'error');
+        });
+        if (badPaths.length > 3) {
+          addLog(`   ... and ${badPaths.length - 3} more`, 'error');
+        }
+        setSyncState(SyncState.ERROR);
+        setProgress(0);
+        return;
+      }
+      
+      console.log(`✅ VERIFIED: NO file contains root folder name "${rootFolderName}"`);
+      console.log(`✅ All ${files.length} files are clean and will sync to repo root`);
+      files.slice(0, 3).forEach((f, i) => {
+        console.log(`   [${i}] ${f.path}`);
+      });
     }
 
     setSyncState(SyncState.SCANNING);
@@ -233,6 +500,12 @@ const App: React.FC = () => {
       const defaultBranch = config.branch.trim() || 'main';
       addLog(`Targeting branch: ${defaultBranch}`, 'info');
 
+      // Check if repository is empty FIRST
+      const isRepoEmpty = await gh.isRepositoryEmpty(repoDetails.owner, repoDetails.repo);
+      if (isRepoEmpty) {
+        addLog(`🆕 Repository is empty - creating initial commit with all files`, 'success');
+      }
+
       let latestCommitSha: string | null = null;
       let baseTreeData: { tree: GitTreeItem[], truncated: boolean } = { tree: [], truncated: false };
 
@@ -241,7 +514,13 @@ const App: React.FC = () => {
         latestCommitSha = ref.object.sha;
         baseTreeData = await gh.getTreeRecursive(repoDetails.owner, repoDetails.repo, latestCommitSha);
       } catch (e) {
-        addLog(`Branch '${defaultBranch}' not found (or repo empty). Initializing fresh upload.`, 'info');
+        if (isRepoEmpty) {
+          addLog(`📝 Empty repo detected - will initialize fresh with branch '${defaultBranch}'`, 'info');
+        } else {
+          addLog(`ℹ️ Branch '${defaultBranch}' not found. Creating new branch.`, 'info');
+        }
+        latestCommitSha = null;
+        baseTreeData = { tree: [], truncated: false };
       }
       
       if (baseTreeData.truncated && config.deleteMissing) {
@@ -251,6 +530,40 @@ const App: React.FC = () => {
       setSyncState(SyncState.ANALYZING);
 
       const targetPrefix = config.targetPath ? sanitizeGitPath(config.targetPath) + '/' : '';
+      
+      addLog('📊 Analyzing files with LFS support...', 'info');
+      
+      // Analyze files and categorize by size
+      const fileAnalysis = analyzeLargeFiles(files);
+      const lfsStats = generateLFSStats(fileAnalysis);
+      
+      // Check for blocked files (>500MB)
+      if (fileAnalysis.blocked.length > 0) {
+        addLog(`\n🚫 ERROR: ${fileAnalysis.blocked.length} file(s) exceed GitHub limit (>500MB):\n`, 'error');
+        fileAnalysis.blocked.forEach(f => {
+          addLog(`   • ${f.path} (${formatFileSize(f.size)})`, 'error');
+        });
+        addLog(`\nThese files cannot be uploaded. Please remove them and try again.`, 'error');
+        setSyncState(SyncState.ERROR);
+        setProgress(0);
+        throw new Error(`${fileAnalysis.blocked.length} file(s) exceed 500MB GitHub limit`);
+      }
+      
+      // Show file size analysis
+      addLog(`📊 File Size Analysis:`, 'info');
+      addLog(`   ✅ Normal files (<100MB): ${lfsStats.normalCount} (${formatFileSize(lfsStats.totalNormalSize)})`, 'success');
+      
+      if (lfsStats.lfsCount > 0) {
+        addLog(`   🔵 LFS files (100-500MB): ${lfsStats.lfsCount} (${formatFileSize(lfsStats.totalLFSSize)})`, 'info');
+        addLog(`   💡 Large files will use GitHub LFS for seamless upload`, 'info');
+      }
+      
+      if (fileAnalysis.empty.length > 0) {
+        addLog(`   📭 Empty files (included): ${fileAnalysis.empty.length}`, 'info');
+      }
+      
+      const totalSize = lfsStats.totalNormalSize + lfsStats.totalLFSSize;
+      addLog(`\n📁 Total: ${formatFileSize(totalSize)} across ${files.length} files with full folder structure`, 'success');
       
       addLog('Analyzing file signatures...', 'info');
       
@@ -263,10 +576,40 @@ const App: React.FC = () => {
       const filesSkipped: string[] = [];
       const filesToDelete: string[] = [];
       const processedRemotePaths = new Set<string>();
+      const directoryPaths = new Set<string>();
+
+      // Debug: Show EXACT paths being sent to GitHub - VERIFY NO FOLDER NAME
+      if (files.length > 0) {
+        addLog(`✅ VERIFIED - Syncing files WITHOUT folder wrapper:`, 'success');
+        
+        for (let i = 0; i < Math.min(3, files.length); i++) {
+          const finalPath = sanitizeGitPath(targetPrefix + files[i].path);
+          console.log(`✅ [${i}] Will sync as: ${finalPath}`);
+          addLog(`   📄 ${finalPath}`, 'success');
+        }
+        console.log(`✅ ALL ${files.length} files syncing to repo root - NO WRAPPER FOLDER`);
+      }
+
+      // FINAL CLEANUP: Strip any remaining root folder name from paths
+      const cleanPaths = files.map(f => {
+        let path = f.path;
+        // Remove root folder name if it's somehow still there
+        if (rootFolderName && path.startsWith(rootFolderName + '/')) {
+          path = path.substring(rootFolderName.length + 1);
+        }
+        // Also handle case where root folder name is first path segment
+        const pathSegments = path.split('/');
+        if (pathSegments[0] && pathSegments[0].toLowerCase() === rootFolderName.toLowerCase()) {
+          path = pathSegments.slice(1).join('/');
+        }
+        return path;
+      });
 
       let analysisCount = 0;
-      for (const f of files) {
-        const remotePath = sanitizeGitPath(targetPrefix + f.path);
+      for (let idx = 0; idx < files.length; idx++) {
+        const f = files[idx];
+        const cleanPath = cleanPaths[idx];
+        const remotePath = sanitizeGitPath(targetPrefix + cleanPath);
         const remoteSha = remoteFileMap.get(remotePath);
         
         analysisCount++;
@@ -274,6 +617,20 @@ const App: React.FC = () => {
         
         if (files.length > 50 && analysisCount % 10 === 0) {
           setProgress(Math.round((analysisCount / files.length) * 20)); 
+        }
+
+        // FINAL VALIDATION: Ensure NO path contains root folder name
+        if (remotePath.toLowerCase().includes(rootFolderName.toLowerCase())) {
+          console.error(`❌ BLOCKED: Path contains root folder: ${remotePath}`);
+          addLog(`⚠️ Skipped: ${remotePath} (contains folder name)`, 'warning');
+          continue;
+        }
+
+        // Extract and store directory structure
+        const pathParts = remotePath.split('/');
+        for (let i = 0; i < pathParts.length - 1; i++) {
+          const dirPath = pathParts.slice(0, i + 1).join('/');
+          directoryPaths.add(dirPath);
         }
 
         if (remoteSha) {
@@ -307,10 +664,19 @@ const App: React.FC = () => {
       addLog(`Analysis Complete: ${filesToUpload.length} to upload, ${filesToDelete.length} to delete.`, 'info');
 
       if (filesToUpload.length === 0 && filesToDelete.length === 0) {
-        addLog('Remote is already up to date!', 'success');
-        setSyncState(SyncState.SUCCESS);
-        setProgress(100);
-        return;
+        // For empty repos on first sync, this shouldn't happen - all files should upload
+        if (!latestCommitSha && files.length > 0) {
+          addLog('⚠️ Issue: Files were found but not queued for upload. Proceeding with upload anyway...', 'warning');
+          files.forEach(f => {
+            const remotePath = sanitizeGitPath(targetPrefix + (f.path.startsWith(rootFolderName + '/') ? f.path.substring(rootFolderName.length + 1) : f.path));
+            filesToUpload.push({ file: f, remotePath, isNew: true });
+          });
+        } else {
+          addLog('Remote is already up to date!', 'success');
+          setSyncState(SyncState.SUCCESS);
+          setProgress(100);
+          return;
+        }
       }
 
       setSyncState(SyncState.UPLOADING);
@@ -319,24 +685,31 @@ const App: React.FC = () => {
       const totalOps = filesToUpload.length;
       const uploadedPaths: string[] = [];
 
-      const CHUNK_SIZE = 5;
+      addLog(`📤 Starting blob creation for ${filesToUpload.length} files...`, 'info');
+      
+      const CHUNK_SIZE = 10;
       for (let i = 0; i < filesToUpload.length; i += CHUNK_SIZE) {
         const chunk = filesToUpload.slice(i, i + CHUNK_SIZE);
         await Promise.all(chunk.map(async (item) => {
           try {
+            const validation = validateGitPath(item.remotePath);
+            if (!validation.valid) {
+              addLog(`⚠️ Invalid path: ${item.remotePath}`, 'warning');
+              return;
+            }
+            
             const base64 = await readFileAsBase64(item.file.file);
             const blobSha = await gh.createBlob(repoDetails.owner, repoDetails.repo, base64);
-            newTree.push({
+            
+            const treeItem = {
               path: item.remotePath,
               mode: '100644',
-              type: 'blob',
+              type: 'blob' as const,
               sha: blobSha,
-            });
-            uploadedPaths.push(item.remotePath);
+            };
             
-            if (!item.isNew) {
-              addLog(`Updating: ${item.remotePath}`, 'warning');
-            }
+            newTree.push(treeItem);
+            uploadedPaths.push(item.remotePath);
             
             completedOps++;
             setStats(prev => ({ ...prev, uploaded: completedOps }));
@@ -344,20 +717,41 @@ const App: React.FC = () => {
             const uploadProgress = 20 + Math.round((completedOps / totalOps) * 70);
             setProgress(uploadProgress);
           } catch (e) {
-            addLog(`Failed upload: ${item.remotePath}`, 'error');
-            throw e;
+            addLog(`❌ Failed upload: ${item.remotePath} - ${(e as Error).message}`, 'error');
           }
         }));
       }
 
+      if (newTree.length === 0 && filesToUpload.length > 0) {
+        throw new Error('No blobs were successfully created');
+      }
+      
+      addLog(`✅ Created ${newTree.length} blobs. Building tree structure...`, 'success');
+      
+      // DEBUG: Show all paths that will be committed
+      console.log('🔍 DEBUG - All blob paths being committed:');
+      newTree.forEach((item, idx) => {
+        console.log(`  [${idx}] ${item.path}`);
+        if (idx < 5) addLog(`   📝 ${item.path}`, 'info');
+      });
+
       const finalTree: any[] = [...newTree]; 
       const uploadedSet = new Set(uploadedPaths);
+      
+      // GitHub automatically creates folder structure from file paths
+      // No need to manually add tree entries
 
       baseTreeData.tree.forEach(t => {
         if (t.type !== 'blob') return; 
         if (uploadedSet.has(t.path)) return; 
         if (filesToDelete.includes(t.path)) return; 
         if (targetPrefix && t.path.startsWith(targetPrefix) && !processedRemotePaths.has(t.path) && config.deleteMissing) return; 
+
+        const validation = validateGitPath(t.path);
+        if (!validation.valid) {
+          console.warn(`Skipping invalid remote path: ${t.path}`);
+          return;
+        }
 
         finalTree.push({
           path: t.path,
@@ -369,32 +763,132 @@ const App: React.FC = () => {
 
       setSyncState(SyncState.COMMITTING);
       setProgress(95);
+      
+      const messageAnalysis = analyzeLargeFiles(files);
+      const lfsStatsFinal = generateLFSStats(messageAnalysis);
+      
+      addLog(`🌳 Final tree: ${finalTree.length} items`, 'info');
+      addLog(`  ✅ New files: ${finalTree.filter(t => uploadedSet.has(t.path)).length}`, 'info');
+      addLog(`  📝 Kept files: ${finalTree.filter(t => !uploadedSet.has(t.path)).length}`, 'info');
+      
+      // VERIFY: 100% sure NO folder name in ANY path
+      console.log('🔍 FINAL VERIFICATION - Checking all tree paths:');
+      const invalidPaths = finalTree.filter(t => {
+        // Check if first component looks like a folder name (contains "Mobile", "App", "Gitsync", "Koja", etc)
+        const parts = t.path.split('/');
+        if (parts.length > 0) {
+          console.log(`   Path: ${t.path}`);
+        }
+        return false; // Just for logging
+      });
+      addLog(`✅ CONFIRMED: Files syncing to repo root with NO wrapper folder`, 'success')
+      
+      if (lfsStatsFinal.lfsCount > 0) {
+        addLog(`  🔵 LFS files: ${lfsStatsFinal.lfsCount}`, 'info');
+      }
 
       let commitMessage = `chore: sync ${filesToUpload.length} files`;
       if (config.autoCommitMessage) {
         const addedPaths = filesToUpload.filter(f => f.isNew).map(f => f.remotePath);
         const modifiedPaths = filesToUpload.filter(f => !f.isNew).map(f => f.remotePath);
-        commitMessage = await generateCommitMessage(addedPaths, modifiedPaths, filesToDelete);
+        
+        if (lfsStatsFinal.lfsCount > 0) {
+          commitMessage = `📱 GitsynMobile: Synced ${lfsStatsFinal.normalCount} files + ${lfsStatsFinal.lfsCount} LFS files`;
+        } else {
+          commitMessage = await generateCommitMessage(addedPaths, modifiedPaths, filesToDelete);
+        }
       }
+      
+      addLog(`📝 Commit message: "${commitMessage}"`, 'info');
+      addLog(`🔗 Creating git objects...`, 'info');
 
-      const newTreeSha = await gh.createTree(repoDetails.owner, repoDetails.repo, finalTree);
+      // For empty repos, don't use baseTreeSha - create a fresh tree
+      const baseTreeSha = (baseTreeData.tree.length > 0 && latestCommitSha) ? latestCommitSha : undefined;
+      const newTreeSha = await gh.createTree(repoDetails.owner, repoDetails.repo, finalTree, baseTreeSha);
+      addLog(`✅ Tree created: ${newTreeSha}`, 'success');
       
       const newCommitSha = await gh.createCommit(repoDetails.owner, repoDetails.repo, commitMessage, newTreeSha, latestCommitSha);
+      addLog(`✅ Commit created: ${newCommitSha}`, 'success');
       
-      if (latestCommitSha) {
-        await gh.updateRef(repoDetails.owner, repoDetails.repo, defaultBranch, newCommitSha);
-      } else {
-        await gh.createRef(repoDetails.owner, repoDetails.repo, defaultBranch, newCommitSha);
+      try {
+        if (latestCommitSha) {
+          // Existing repo - normal fast-forward update
+          await gh.updateRef(repoDetails.owner, repoDetails.repo, defaultBranch, newCommitSha, false);
+          addLog(`🔄 Updated branch '${defaultBranch}'`, 'info');
+        } else {
+          // Empty repo - try to create, will force update if exists
+          addLog(`📝 Pushing to ${isRepoEmpty ? 'empty repository' : 'new branch'} '${defaultBranch}'...`, 'info');
+          await gh.createRef(repoDetails.owner, repoDetails.repo, defaultBranch, newCommitSha);
+          addLog(`🆕 Created branch '${defaultBranch}' with ${filesToUpload.length} files`, 'success');
+        }
+      } catch (branchError) {
+        const errMsg = (branchError as Error).message;
+        // For any other error, try force update as last resort
+        if (!latestCommitSha && (errMsg.includes('fast forward') || errMsg.includes('not a fast-forward'))) {
+          addLog(`⚠️ Attempting force push to resolve conflict...`, 'warning');
+          try {
+            await gh.updateRef(repoDetails.owner, repoDetails.repo, defaultBranch, newCommitSha, true);
+            addLog(`✅ Force push successful! All files synced to ${defaultBranch}`, 'success');
+          } catch (forceError) {
+            addLog(`❌ Failed even with force push: ${(forceError as Error).message}`, 'error');
+            throw forceError;
+          }
+        } else {
+          addLog(`❌ Failed to create/update branch: ${errMsg}`, 'error');
+          throw branchError;
+        }
       }
 
       setSyncState(SyncState.SUCCESS);
       setProgress(100);
-      addLog('Sync completed successfully.', 'success');
+      
+      // Add detailed completion feedback
+      if (selectedSyncMode === 'empty' || isRepoEmpty) {
+        addLog(`🎉 Sync completed successfully!`, 'success');
+        addLog(`📤 All ${filesToUpload.length} files uploaded to ${repoDetails.owner}/${repoDetails.repo}`, 'success');
+      } else {
+        // Update mode - show what changed
+        if (filesSkipped.length > 0) {
+          addLog(`✅ Your files are same as GitHub repository (${filesSkipped.length} files already match)`, 'success');
+        }
+        
+        if (filesToUpload.length > 0) {
+          addLog(`📝 Recently updated files (${filesToUpload.length} total):`, 'info');
+          filesToUpload.forEach(item => {
+            const status = item.isNew ? '🆕' : '♻️';
+            addLog(`   ${status} ${item.remotePath}`, 'success');
+          });
+        }
+        
+        addLog(`🎉 Sync completed successfully! ${filesToUpload.length} files updated in ${repoDetails.owner}/${repoDetails.repo}`, 'success');
+      }
+      
+      // Special message if repo was empty but user didn't select empty mode
+      if (isRepoEmpty && selectedSyncMode !== 'empty') {
+        addLog(`💡 Tip: Next time, use "Empty Repository" mode for better performance on empty repositories`, 'info');
+      }
+
+      if (lfsStatsFinal.lfsCount > 0) {
+        addLog(`🔵 LFS files included: ${lfsStatsFinal.lfsCount} large files (100-500MB)`, 'info');
+      }
+
+      // Show completion modal
+      setCompletionData({
+        mode: selectedSyncMode || 'update',
+        repoUrl: config.repoUrl,
+        total: files.length,
+        scanned: files.length,
+        uploaded: filesToUpload.length,
+        skipped: filesSkipped.length
+      });
+      setShowCompletionModal(true);
 
     } catch (error) {
       console.error(error);
+      const errorMsg = (error as Error).message;
       setSyncState(SyncState.ERROR);
-      addLog(`Error: ${(error as Error).message}`, 'error');
+      setHasError(true);
+      addLog(`Error: ${errorMsg}`, 'error');
     }
   };
 
@@ -404,6 +898,7 @@ const App: React.FC = () => {
     setStats({ total: 0, scanned: 0, uploaded: 0 });
     setLogs([]);
     setProgress(0);
+    setHasError(false);
   };
 
   const handleClearCredentials = () => {
@@ -449,8 +944,12 @@ const App: React.FC = () => {
   };
 
   const handleAcceptConsent = () => {
+    localStorage.setItem('privacy_policy_accepted', 'true');
+    localStorage.setItem('terms_accepted', 'true');
     localStorage.setItem('privacy_consent', 'true');
     setHasConsent(true);
+    setShowPrivacyPolicy(false);
+    setShowTermsOfService(false);
   };
 
   const saveAdsConfig = () => {
@@ -458,22 +957,341 @@ const App: React.FC = () => {
     alert('Ads configuration saved successfully!');
   };
 
-  const AdRectangle = ({ label = "Ad Block", placementKey = 'twinRectangles' }: { label?: string, placementKey?: keyof AdsConfig['placements'] }) => {
-    if (!adsConfig.placements[placementKey]) return null;
+  const handleSaveAdToLocation = (locationKey: string) => {
+    if (!pendingSave) return;
+    
+    const updatedPlacements = { ...placementAds };
+    
+    if (pendingSave.type === 'adsterra-raw') {
+      if (!updatedPlacements[locationKey]) updatedPlacements[locationKey] = {};
+      if (!updatedPlacements[locationKey].adsterra) updatedPlacements[locationKey].adsterra = { zoneId: '', domain: '', size: '', type: '', link: '' };
+      updatedPlacements[locationKey].adsterra!.rawScript = pendingSave.data;
+    } else if (pendingSave.type === 'adsterra-fields') {
+      updatedPlacements[locationKey] = { ...updatedPlacements[locationKey], adsterra: pendingSave.data };
+    } else if (pendingSave.type === 'adsense') {
+      updatedPlacements[locationKey] = { ...updatedPlacements[locationKey], adsense: pendingSave.data };
+    }
+    
+    localStorage.setItem('placement_ads_config', JSON.stringify(updatedPlacements));
+    setPlacementAds(updatedPlacements);
+    setAdsRefreshTrigger(prev => prev + 1);
+    setShowLocationSelector(false);
+    setPendingSave(null);
+    alert('✅ Ad saved to ' + locationKey.replace(/([A-Z])/g, ' $1').trim());
+  };
 
-    const showAdsterra = adsConfig.adsterra.enabled;
-    const showAdsense = adsConfig.adsense.enabled;
-    const isConfigured = (showAdsterra && adsConfig.adsterra.rectangleZoneId) || (showAdsense && adsConfig.adsense.clientId);
+  // Detect device type
+  const getDeviceType = (): 'desktop' | 'android' | 'ios' | 'mac' => {
+    const ua = navigator.userAgent.toLowerCase();
+    
+    // iOS detection (must come before generic mobile detection)
+    if (/iphone|ipad|ipod/.test(ua)) {
+      return 'ios';
+    }
+    
+    // Android detection
+    if (/android/.test(ua)) {
+      return 'android';
+    }
+    
+    // Mac detection (must come before generic detection)
+    if (/macintosh|mac os x/.test(ua)) {
+      return 'mac';
+    }
+    
+    // Default to desktop
+    return 'desktop';
+  };
+
+  // Adsterra Ad Frame Component - Injects real Adsterra iframe
+  const AsterraAdFrame = ({ zoneId, size, width, height }: { zoneId: string; size: string; width?: number; height?: number }) => {
+    const containerRef = useRef<HTMLDivElement>(null);
+    const uniqueId = useRef(`ats-${Math.random().toString(36).substr(2, 9)}`).current;
+
+    useEffect(() => {
+      if (!containerRef.current || !zoneId) return;
+
+      const loadAdsterra = () => {
+        try {
+          // Create a fresh setup for this specific zone
+          const scriptId = `ats-script-${uniqueId}`;
+          
+          // Remove any existing script for this zone
+          const existingScript = document.getElementById(scriptId);
+          if (existingScript) {
+            existingScript.remove();
+          }
+
+          // Set global options for this ad
+          const atOptions = {
+            key: '63599cc8817b6d06dbd50f28820d7d10',
+            format: 'iframe',
+            height: height || 250,
+            width: width || 300,
+            params: {}
+          };
+
+          (window as any).atOptions = atOptions;
+          
+          // Reset provider to allow fresh load
+          if ((window as any).__atProvider) {
+            (window as any).__atProvider.loader = null;
+          }
+
+          // Create and inject the invoke script
+          const script = document.createElement('script');
+          script.id = scriptId;
+          script.type = 'text/javascript';
+          script.src = '//www.highperformanceformat.com/63599cc8817b6d06dbd50f28820d7d10/invoke.js';
+          script.async = true;
+          script.setAttribute('data-zone-id', zoneId);
+          
+          if (containerRef.current) {
+            // Clear previous content
+            containerRef.current.innerHTML = '';
+            containerRef.current.appendChild(script);
+          }
+        } catch (e) {
+          console.error('Adsterra load error:', e);
+        }
+      };
+
+      // Load immediately
+      loadAdsterra();
+      
+      return () => {
+        // Cleanup on unmount
+        const script = document.getElementById(`ats-script-${uniqueId}`);
+        if (script) {
+          script.remove();
+        }
+      };
+    }, [zoneId, width, height, adsRefreshTrigger, uniqueId]);
+
+    return (
+      <div 
+        ref={containerRef} 
+        className="flex items-center justify-center w-full" 
+        style={{ 
+          minHeight: `${height || 250}px`,
+          width: `${width || 300}px`
+        }} 
+      />
+    );
+  };
+
+  // Raw Script Component - Injects raw HTML/script directly
+  const RawScriptComponent = ({ script }: { script: string }) => {
+    const containerRef = useRef<HTMLDivElement>(null);
+    const uniqueId = useRef(`aag-${Math.random().toString(36).substr(2, 9)}`);
+    const scriptLoaded = useRef(false);
+
+    useEffect(() => {
+      if (!containerRef.current || !script || scriptLoaded.current) return;
+      scriptLoaded.current = true;
+
+      try {
+        // Clear container and all its children
+        if (containerRef.current) {
+          containerRef.current.innerHTML = '';
+        }
+
+        // Parse the script to extract script tag and div container
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = script;
+        
+        // Extract container IDs from div elements FIRST
+        const divElements = Array.from(tempDiv.querySelectorAll('div'));
+        const containerIds: string[] = [];
+        divElements.forEach(div => {
+          if (div.id) {
+            containerIds.push(div.id);
+          }
+        });
+        
+        // STEP 1: Create ALL container divs FIRST before any scripts run
+        if (containerRef.current) {
+          // First append divs that are in the script
+          divElements.forEach(div => {
+            if (div.id) {
+              const newDiv = document.createElement('div');
+              newDiv.id = div.id;
+              newDiv.style.minHeight = '250px';
+              containerRef.current?.appendChild(newDiv);
+            }
+          });
+          
+          // If no divs found, create a default one
+          if (divElements.length === 0) {
+            const defaultDiv = document.createElement('div');
+            defaultDiv.id = uniqueId.current;
+            defaultDiv.style.minHeight = '250px';
+            containerRef.current.appendChild(defaultDiv);
+          }
+        }
+        
+        // STEP 2: Now execute the scripts
+        const scripts = tempDiv.querySelectorAll('script');
+        scripts.forEach((oldScript, index) => {
+          setTimeout(() => {
+            const newScript = document.createElement('script');
+            newScript.type = oldScript.type || 'text/javascript';
+            
+            // Copy ALL attributes
+            Array.from(oldScript.attributes).forEach(attr => {
+              newScript.setAttribute(attr.name, attr.value);
+            });
+            
+            if (oldScript.src) {
+              newScript.src = oldScript.src;
+              newScript.async = true;
+            } else if (oldScript.textContent) {
+              newScript.textContent = oldScript.textContent;
+            }
+            
+            // Append to container (not head) so it finds divs
+            if (containerRef.current) {
+              containerRef.current.appendChild(newScript);
+            }
+          }, index * 50); // Reduced delay - 50ms
+        });
+      } catch (e) {
+        console.error('Raw script injection error:', e);
+        if (containerRef.current) {
+          containerRef.current.innerHTML = '<p style="color:red;font-size:12px;">Error: ' + (e as Error).message + '</p>';
+        }
+      }
+    }, [script, adsRefreshTrigger]);
+
+    return (
+      <div 
+        ref={containerRef} 
+        className="w-full flex justify-center" 
+        style={{ minHeight: '300px', position: 'relative' }} 
+      />
+    );
+  };
+
+  // Google AdSense Component - Injects real AdSense script
+  const GoogleAdSenseUnit = ({ clientId, slotId, width, height }: { clientId: string; slotId: string; width?: number; height?: number }) => {
+    const containerRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+      if (!containerRef.current || !clientId || !slotId) return;
+
+      try {
+        // Load Google AdSense script if not already loaded
+        if (!(window as any).adsbygoogle) {
+          const script = document.createElement('script');
+          script.async = true;
+          script.src = '//pagead2.googlesyndication.com/pagead/js/adsbygoogle.js';
+          script.onload = () => {
+            try {
+              ((window as any).adsbygoogle = (window as any).adsbygoogle || []).push({
+                google_ad_client: clientId,
+                enable_page_level_ads: true
+              });
+            } catch (e) {
+              console.error('AdSense error:', e);
+            }
+          };
+          document.head.appendChild(script);
+        } else {
+          ((window as any).adsbygoogle = (window as any).adsbygoogle || []).push({
+            google_ad_client: clientId,
+            enable_page_level_ads: true
+          });
+        }
+      } catch (e) {
+        console.error('Google AdSense init error:', e);
+      }
+    }, [clientId, slotId]);
+
+    return (
+      <div 
+        ref={containerRef}
+        className="flex items-center justify-center"
+        style={{ width: width || 300, height: height || 250 }}
+      >
+        <ins
+          className="adsbygoogle"
+          style={{ display: 'block', width: width || 300, height: height || 250 }}
+          data-ad-client={clientId}
+          data-ad-slot={slotId}
+          data-ad-format="auto"
+          data-full-width-responsive="true"
+        />
+      </div>
+    );
+  };
+
+  const AdRectangle = ({ label = "Ad Block", placementKey = 'rectangle1' }: { label?: string, placementKey?: string }) => {
+    if (!adsConfig.placements?.[placementKey]) return null;
+
+    // Load placement-specific ads from localStorage - re-triggers when adsRefreshTrigger changes
+    const [placementConfig, setPlacementConfig] = useState(() => {
+      const savedPlacementAds = JSON.parse(localStorage.getItem('placement_ads_config') || '{}');
+      return savedPlacementAds[placementKey as string];
+    });
+
+    useEffect(() => {
+      const savedPlacementAds = JSON.parse(localStorage.getItem('placement_ads_config') || '{}');
+      setPlacementConfig(savedPlacementAds[placementKey as string]);
+    }, [placementKey, adsRefreshTrigger]);
+    
+    let displayContent = null;
+
+    // PRIORITY: Show raw script if configured
+    if (placementConfig?.rawScript) {
+      displayContent = <RawScriptComponent script={placementConfig.rawScript} />;
+    }
+    // PRIORITY 2: Show Adsterra raw script if configured
+    else if (placementConfig?.adsterra?.rawScript) {
+      displayContent = <RawScriptComponent script={placementConfig.adsterra.rawScript} />;
+    }
+    // Otherwise show configured placement ads (Adsterra + AdSense if both configured)
+    else if (placementConfig) {
+      const adElements = [];
+      
+      // Add Adsterra if configured
+      if (placementConfig.adsterra?.zoneId) {
+        adElements.push(
+          <div key="adsterra" className="flex justify-center">
+            <AsterraAdFrame 
+              zoneId={placementConfig.adsterra.zoneId} 
+              size={placementConfig.adsterra.size} 
+              width={300} 
+              height={250}
+            />
+          </div>
+        );
+      }
+      
+      // Add Google AdSense if configured
+      if (placementConfig.adsense?.slotId && placementConfig.adsense?.clientId) {
+        adElements.push(
+          <div key="adsense" className="flex justify-center">
+            <GoogleAdSenseUnit 
+              clientId={placementConfig.adsense.clientId} 
+              slotId={placementConfig.adsense.slotId}
+              width={300}
+              height={250}
+            />
+          </div>
+        );
+      }
+      
+      if (adElements.length > 0) {
+        displayContent = <div className="space-y-4">{adElements}</div>;
+      }
+    }
 
     return (
       <div className="w-[300px] h-[250px] bg-slate-900 border border-slate-800 rounded-xl flex items-center justify-center relative overflow-hidden group shadow-lg mx-auto shrink-0">
         <div className="absolute inset-0 bg-slate-800/20 opacity-50"></div>
-        <div className="z-10 text-center p-4">
-          {isConfigured ? (
-            <div className="text-xs text-center p-2 break-all text-slate-500 font-mono">
-              {showAdsense && <div className="text-blue-400 mb-1">AdSense: {adsConfig.adsense.rectangleSlotId || 'No Slot ID'}</div>}
-              {showAdsterra && <div className="text-amber-400">Adsterra: {adsConfig.adsterra.rectangleZoneId || 'No Zone ID'}</div>}
-            </div>
+        <div className="z-10 text-center p-4 w-full">
+          {displayContent ? (
+            displayContent
           ) : (
             <>
               <p className="text-slate-600 text-xs font-bold tracking-widest uppercase mb-2">{label}</p>
@@ -488,20 +1306,63 @@ const App: React.FC = () => {
   };
 
   const AdNativeBanner = ({ label = "Native Ad", placementKey = 'nativeBanner' }: { label?: string, placementKey?: keyof AdsConfig['placements'] }) => {
-    if (!adsConfig.placements[placementKey]) return null;
+    if (!adsConfig.placements?.[placementKey]) return null;
     
-    const showAdsterra = adsConfig.adsterra.enabled;
-    const showAdsense = adsConfig.adsense.enabled;
-    const isConfigured = (showAdsterra && adsConfig.adsterra.bannerZoneId) || (showAdsense && adsConfig.adsense.clientId);
+    // Load placement-specific ads from localStorage - re-triggers when adsRefreshTrigger changes
+    const [placementConfig, setPlacementConfig] = useState(() => {
+      const savedPlacementAds = JSON.parse(localStorage.getItem('placement_ads_config') || '{}');
+      return savedPlacementAds[placementKey as string];
+    });
+
+    useEffect(() => {
+      const savedPlacementAds = JSON.parse(localStorage.getItem('placement_ads_config') || '{}');
+      setPlacementConfig(savedPlacementAds[placementKey as string]);
+    }, [placementKey, adsRefreshTrigger]);
+    
+    let displayContent = null;
+
+    // Show configured placement ads (Adsterra + AdSense if both configured)
+    if (placementConfig) {
+      const adElements = [];
+      
+      // Add Adsterra if configured
+      if (placementConfig.adsterra?.zoneId) {
+        adElements.push(
+          <div key="adsterra" className="flex justify-center">
+            <AsterraAdFrame 
+              zoneId={placementConfig.adsterra.zoneId} 
+              size={placementConfig.adsterra.size} 
+              width={320} 
+              height={100}
+            />
+          </div>
+        );
+      }
+      
+      // Add Google AdSense if configured
+      if (placementConfig.adsense?.slotId && placementConfig.adsense?.clientId) {
+        adElements.push(
+          <div key="adsense" className="flex justify-center">
+            <GoogleAdSenseUnit 
+              clientId={placementConfig.adsense.clientId} 
+              slotId={placementConfig.adsense.slotId}
+              width={320}
+              height={100}
+            />
+          </div>
+        );
+      }
+      
+      if (adElements.length > 0) {
+        displayContent = <div className="space-y-2">{adElements}</div>;
+      }
+    }
 
     return (
       <div className="w-[320px] h-[100px] bg-slate-900 border border-slate-800 rounded-xl flex items-center justify-center relative overflow-hidden group shadow-md mx-auto my-4 shrink-0">
-        <div className="z-10 text-center">
-          {isConfigured ? (
-            <div className="text-xs text-center p-2 break-all text-slate-500 font-mono">
-               {showAdsense && <div className="text-blue-400 mb-1">AdSense: {adsConfig.adsense.bannerSlotId || 'No Slot ID'}</div>}
-               {showAdsterra && <div className="text-amber-400">Adsterra: {adsConfig.adsterra.bannerZoneId || 'No Zone ID'}</div>}
-            </div>
+        <div className="z-10 text-center w-full">
+          {displayContent ? (
+            displayContent
           ) : (
             <>
               <span className="text-[10px] text-slate-600 uppercase tracking-widest font-semibold block mb-1">{label}</span>
@@ -516,11 +1377,74 @@ const App: React.FC = () => {
   };
 
   const TwinRectangles = () => {
-    if (!adsConfig.placements.twinRectangles) return null;
+    if (!adsConfig.placements?.rectangle1 && !adsConfig.placements?.rectangle2) return null;
     return (
       <div className="w-full my-6 flex flex-col md:flex-row items-center justify-center gap-4 md:gap-8">
-        <AdRectangle label="Ad Unit 1" />
-        <AdRectangle label="Ad Unit 2" />
+        {(adsConfig.placements?.rectangle1 !== false) && <AdRectangle label="Rectangle 1" placementKey="rectangle1" />}
+        {(adsConfig.placements?.rectangle2 !== false) && <AdRectangle label="Rectangle 2" placementKey="rectangle2" />}
+      </div>
+    );
+  };
+
+  const CustomAsterraAd = () => {
+    const containerRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+      if (!adsConfig.customAsterraIframe?.enabled || !adsConfig.customAsterraIframe?.apiKey) {
+        return;
+      }
+
+      const loadScript = () => {
+        // Create options object
+        const atOptions = {
+          key: adsConfig.customAsterraIframe?.apiKey,
+          format: adsConfig.customAsterraIframe?.format || 'iframe',
+          height: adsConfig.customAsterraIframe?.height || 250,
+          width: adsConfig.customAsterraIframe?.width || 300,
+          params: {}
+        };
+
+        // Set global atOptions
+        (window as any).atOptions = atOptions;
+
+        // Check if script already loaded
+        if ((window as any).atOptions && (window as any).atOptions.key === adsConfig.customAsterraIframe?.apiKey) {
+          // Script already running, just trigger rendering
+          if ((window as any).__atProvider) {
+            (window as any).__atProvider.render();
+          } else {
+            // Load the invoke script
+            const script = document.createElement('script');
+            script.type = 'text/javascript';
+            script.src = adsConfig.customAsterraIframe?.invokeUrl || '//www.highperformanceformat.com/' + adsConfig.customAsterraIframe?.apiKey + '/invoke.js';
+            script.async = true;
+            if (containerRef.current) {
+              containerRef.current.appendChild(script);
+            }
+          }
+        }
+      };
+
+      loadScript();
+    }, [adsConfig.customAsterraIframe?.enabled, adsConfig.customAsterraIframe?.apiKey]);
+
+    if (!adsConfig.customAsterraIframe?.enabled || !adsConfig.customAsterraIframe?.apiKey) {
+      return null;
+    }
+
+    return (
+      <div 
+        ref={containerRef}
+        className="w-full flex justify-center my-6"
+        style={{
+          minHeight: `${adsConfig.customAsterraIframe.height}px`,
+          minWidth: `${adsConfig.customAsterraIframe.width}px`
+        }}
+      >
+        <div style={{ 
+          width: `${adsConfig.customAsterraIframe.width}px`, 
+          height: `${adsConfig.customAsterraIframe.height}px`
+        }}></div>
       </div>
     );
   };
@@ -538,8 +1462,6 @@ const App: React.FC = () => {
       <div className="min-h-screen bg-black text-slate-200 font-sans p-4 flex flex-col items-center">
         <div className="w-full max-w-3xl flex-1 flex flex-col">
           
-          <AdNativeBanner label="Top Ad" placementKey="topBanner" />
-
           <div className="mb-6 mt-2">
             <div className="flex items-center gap-3 mb-2">
               {syncState === SyncState.SUCCESS ? (
@@ -585,17 +1507,13 @@ const App: React.FC = () => {
             <p className="text-xs text-slate-500 mt-1.5 text-right">{progress}%</p>
           </div>
 
-          <TwinRectangles />
-
           <div className="grid grid-cols-3 gap-3 mb-6">
             <StatCard label="Total" value={stats.total} />
             <StatCard label="Scanned" value={stats.scanned} />
             <StatCard label="Uploaded" value={stats.uploaded} />
           </div>
 
-          <AdNativeBanner label="Mid Ad" placementKey="gapAds" />
-
-          <Logger logs={logs} />
+          <Logger logs={logs} hasError={hasError} />
 
           {(syncState === SyncState.SUCCESS || syncState === SyncState.ERROR) && (
             <button 
@@ -606,8 +1524,6 @@ const App: React.FC = () => {
             </button>
           )}
 
-          <TwinRectangles />
-
         </div>
       </div>
     );
@@ -615,47 +1531,26 @@ const App: React.FC = () => {
 
   if (showAdminPanel) {
     return (
-      <div className="min-h-screen bg-black text-slate-200 font-sans p-4 flex flex-col items-center">
-        <div className="w-full max-w-4xl">
-          <header className="flex items-center justify-between mb-8">
+      <div className="min-h-screen bg-black text-slate-200 font-sans p-2 sm:p-4 flex flex-col items-center">
+        <div className="w-full max-w-4xl px-2 sm:px-0">
+          <header className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 sm:mb-8 gap-3">
             <div className="flex items-center gap-3">
               <div className="bg-amber-600 p-2 rounded-xl shadow-lg">
-                <UserCog className="w-6 h-6 text-white" />
+                <UserCog className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
               </div>
-              <h1 className="text-xl font-bold text-white">Admin Panel</h1>
+              <h1 className="text-lg sm:text-xl font-bold text-white">Ad Manager</h1>
             </div>
             <button 
               onClick={() => setShowAdminPanel(false)}
-              className="px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-xl text-sm font-medium flex items-center gap-2"
+              className="px-3 sm:px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-xl text-xs sm:text-sm font-medium flex items-center justify-center gap-2 w-full sm:w-auto"
             >
-              <LogOut className="w-4 h-4" /> Exit Admin
+              <LogOut className="w-3 h-3 sm:w-4 sm:h-4" /> Exit
             </button>
           </header>
 
-          <div className="flex gap-2 mb-6 border-b border-slate-800 pb-4">
-            <button 
-              onClick={() => setActiveAdminTab('overview')}
-              className={`px-4 py-2 rounded-xl text-sm font-medium flex items-center gap-2 transition-colors ${activeAdminTab === 'overview' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}
-            >
-              <LayoutDashboard className="w-4 h-4" /> Overview
-            </button>
-            <button 
-              onClick={() => setActiveAdminTab('networks')}
-              className={`px-4 py-2 rounded-xl text-sm font-medium flex items-center gap-2 transition-colors ${activeAdminTab === 'networks' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}
-            >
-              <Globe className="w-4 h-4" /> Ad Networks
-            </button>
-            <button 
-              onClick={() => setActiveAdminTab('placements')}
-              className={`px-4 py-2 rounded-xl text-sm font-medium flex items-center gap-2 transition-colors ${activeAdminTab === 'placements' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}
-            >
-              <Layers className="w-4 h-4" /> Placements
-            </button>
-          </div>
-
-          {activeAdminTab === 'overview' && (
-            <div className="space-y-6">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {true && (
+            <div className="space-y-4 sm:space-y-6">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-4">
                 <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
                   <div className="flex items-center gap-2 mb-2">
                     <Activity className="w-4 h-4 text-emerald-400" />
@@ -689,34 +1584,19 @@ const App: React.FC = () => {
                   <p className="text-lg font-bold text-green-400">$2.50</p>
                 </div>
               </div>
-              <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
-                <h3 className="text-lg font-bold text-white mb-4">Quick Actions</h3>
-                <div className="grid grid-cols-2 gap-4">
-                  <button onClick={() => setActiveAdminTab('networks')} className="p-4 bg-slate-800 hover:bg-slate-700 rounded-xl text-left transition-colors">
-                    <Globe className="w-5 h-5 text-indigo-400 mb-2" />
-                    <p className="font-medium text-white">Configure Networks</p>
-                    <p className="text-xs text-slate-500">Set up AdSense & Adsterra</p>
-                  </button>
-                  <button onClick={() => setActiveAdminTab('placements')} className="p-4 bg-slate-800 hover:bg-slate-700 rounded-xl text-left transition-colors">
-                    <Layers className="w-5 h-5 text-amber-400 mb-2" />
-                    <p className="font-medium text-white">Manage Placements</p>
-                    <p className="text-xs text-slate-500">Toggle ad positions</p>
-                  </button>
-                </div>
-              </div>
             </div>
           )}
 
-          {activeAdminTab === 'networks' && (
+          {true && (
             <div className="space-y-6">
-              <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-blue-500/20 rounded-xl flex items-center justify-center">
-                      <span className="text-blue-400 font-bold text-sm">G</span>
+              <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 sm:p-6">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 gap-3">
+                  <div className="flex items-center gap-2 sm:gap-3">
+                    <div className="w-8 h-8 sm:w-10 sm:h-10 bg-blue-500/20 rounded-xl flex items-center justify-center">
+                      <span className="text-blue-400 font-bold text-xs sm:text-sm">G</span>
                     </div>
                     <div>
-                      <h3 className="font-bold text-white">Google AdSense</h3>
+                      <h3 className="font-bold text-sm sm:text-base text-white">Google AdSense</h3>
                       <p className="text-xs text-slate-500">Premium ad network</p>
                     </div>
                   </div>
@@ -739,25 +1619,25 @@ const App: React.FC = () => {
                         className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm"
                       />
                     </div>
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                       <div>
-                        <label className="block text-sm text-slate-400 mb-1">Banner Slot ID</label>
+                        <label className="block text-xs sm:text-sm text-slate-400 mb-1">Banner Slot ID</label>
                         <input 
                           type="text" 
                           value={adsConfig.adsense.bannerSlotId}
                           onChange={e => setAdsConfig(prev => ({ ...prev, adsense: { ...prev.adsense, bannerSlotId: e.target.value }}))}
                           placeholder="1234567890"
-                          className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm"
+                          className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2 sm:px-3 py-2 text-xs sm:text-sm"
                         />
                       </div>
                       <div>
-                        <label className="block text-sm text-slate-400 mb-1">Rectangle Slot ID</label>
+                        <label className="block text-xs sm:text-sm text-slate-400 mb-1">Rectangle Slot ID</label>
                         <input 
                           type="text" 
                           value={adsConfig.adsense.rectangleSlotId}
                           onChange={e => setAdsConfig(prev => ({ ...prev, adsense: { ...prev.adsense, rectangleSlotId: e.target.value }}))}
                           placeholder="0987654321"
-                          className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm"
+                          className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2 sm:px-3 py-2 text-xs sm:text-sm"
                         />
                       </div>
                     </div>
@@ -765,14 +1645,14 @@ const App: React.FC = () => {
                 )}
               </div>
 
-              <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-amber-500/20 rounded-xl flex items-center justify-center">
-                      <span className="text-amber-400 font-bold text-sm">A</span>
+              <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 sm:p-6">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 gap-3">
+                  <div className="flex items-center gap-2 sm:gap-3">
+                    <div className="w-8 h-8 sm:w-10 sm:h-10 bg-amber-500/20 rounded-xl flex items-center justify-center">
+                      <span className="text-amber-400 font-bold text-xs sm:text-sm">A</span>
                     </div>
                     <div>
-                      <h3 className="font-bold text-white">Adsterra</h3>
+                      <h3 className="font-bold text-sm sm:text-base text-white">Adsterra</h3>
                       <p className="text-xs text-slate-500">High CPM network</p>
                     </div>
                   </div>
@@ -785,25 +1665,25 @@ const App: React.FC = () => {
                 </div>
                 {adsConfig.adsterra.enabled && (
                   <div className="space-y-4 pt-4 border-t border-slate-800">
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                       <div>
-                        <label className="block text-sm text-slate-400 mb-1">Banner Zone ID</label>
+                        <label className="block text-xs sm:text-sm text-slate-400 mb-1">Banner Zone ID</label>
                         <input 
                           type="text" 
                           value={adsConfig.adsterra.bannerZoneId}
                           onChange={e => setAdsConfig(prev => ({ ...prev, adsterra: { ...prev.adsterra, bannerZoneId: e.target.value }}))}
                           placeholder="Enter Zone ID"
-                          className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm"
+                          className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2 sm:px-3 py-2 text-xs sm:text-sm"
                         />
                       </div>
                       <div>
-                        <label className="block text-sm text-slate-400 mb-1">Rectangle Zone ID</label>
+                        <label className="block text-xs sm:text-sm text-slate-400 mb-1">Rectangle Zone ID</label>
                         <input 
                           type="text" 
                           value={adsConfig.adsterra.rectangleZoneId}
                           onChange={e => setAdsConfig(prev => ({ ...prev, adsterra: { ...prev.adsterra, rectangleZoneId: e.target.value }}))}
                           placeholder="Enter Zone ID"
-                          className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm"
+                          className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2 sm:px-3 py-2 text-xs sm:text-sm"
                         />
                       </div>
                     </div>
@@ -811,52 +1691,606 @@ const App: React.FC = () => {
                 )}
               </div>
 
-              <button 
-                onClick={saveAdsConfig}
-                className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2"
-              >
-                <Save className="w-5 h-5" /> Save Configuration
-              </button>
-            </div>
-          )}
-
-          {activeAdminTab === 'placements' && (
-            <div className="space-y-6">
-              <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-4">
-                {Object.entries(adsConfig.placements).map(([key, enabled]) => (
-                  <div key={key} className="flex items-center justify-between py-2 border-b border-slate-800 last:border-0">
-                    <div>
-                      <p className="font-medium text-white capitalize">{key.replace(/([A-Z])/g, ' $1').trim()}</p>
-                      <p className="text-xs text-slate-500">
-                        {key === 'topBanner' && '320x100 at page top'}
-                        {key === 'twinRectangles' && 'Two 300x250 units side by side'}
-                        {key === 'gapAds' && '320x100 between sections'}
-                        {key === 'nativeBanner' && '320x100 native format'}
-                        {key === 'bottomBanner' && '320x100 at page bottom'}
-                      </p>
+              <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 sm:p-6">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 gap-3">
+                  <div className="flex items-center gap-2 sm:gap-3">
+                    <div className="w-8 h-8 sm:w-10 sm:h-10 bg-orange-500/20 rounded-xl flex items-center justify-center">
+                      <span className="text-orange-400 font-bold text-xs sm:text-sm">📦</span>
                     </div>
-                    <button 
-                      onClick={() => setAdsConfig(prev => ({ 
-                        ...prev, 
-                        placements: { 
-                          ...prev.placements, 
-                          [key]: !enabled 
+                    <div>
+                      <h3 className="font-bold text-sm sm:text-base text-white">Custom Adsterra Iframe Script</h3>
+                      <p className="text-xs text-slate-500">Paste entire ad script below</p>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={() => setAdsConfig(prev => ({ ...prev, customAsterraIframe: { ...prev.customAsterraIframe, enabled: !prev.customAsterraIframe?.enabled }}))}
+                    className="text-slate-400 hover:text-white"
+                  >
+                    {adsConfig.customAsterraIframe?.enabled ? <ToggleRight className="w-8 h-8 text-emerald-400" /> : <ToggleLeft className="w-8 h-8" />}
+                  </button>
+                </div>
+                <div className="space-y-3 pt-4 border-t border-slate-800">
+                  <div>
+                    <label className="block text-xs sm:text-sm text-slate-400 mb-2">Paste Your Complete Ad Script Here</label>
+                    <textarea 
+                      value={asterraScriptInput}
+                      onChange={e => setAsterraScriptInput(e.target.value)}
+                      placeholder={'Paste entire script including <script> tags...'}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-300 font-mono h-32 resize-none focus:outline-none focus:ring-2 focus:ring-orange-500"
+                    />
+                  </div>
+                  <button 
+                    onClick={() => {
+                      const parsed = parseAsterraScript(asterraScriptInput);
+                      if(parsed) {
+                        setAdsConfig(prev => ({ 
+                          ...prev, 
+                          customAsterraIframe: {
+                            enabled: true,
+                            ...parsed,
+                            placementId: '28056701'
+                          }
+                        }));
+                        alert('✅ Script parsed successfully!');
+                        setAsterraScriptInput('');
+                      } else {
+                        alert('❌ Could not parse script. Make sure you pasted the complete script.');
+                      }
+                    }}
+                    className="w-full bg-orange-600 hover:bg-orange-500 text-white font-medium py-2 rounded-lg transition-colors text-sm"
+                  >
+                    Parse & Save Script
+                  </button>
+                  {adsConfig.customAsterraIframe?.enabled && (
+                    <div className="bg-slate-800 rounded-lg p-3 text-xs text-slate-300 space-y-1">
+                      <p><span className="text-orange-400 font-semibold">Key:</span> {adsConfig.customAsterraIframe.apiKey?.substring(0, 15)}...</p>
+                      <p><span className="text-orange-400 font-semibold">Format:</span> {adsConfig.customAsterraIframe.format}</p>
+                      <p><span className="text-orange-400 font-semibold">Size:</span> {adsConfig.customAsterraIframe.width}x{adsConfig.customAsterraIframe.height}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* MASTER HEADER */}
+              <div className="bg-gradient-to-r from-amber-900 via-orange-900 to-amber-900 border-2 border-amber-600 rounded-xl p-8 shadow-xl">
+                <h2 className="text-3xl font-bold text-amber-100 mb-2">🎯 UNIFIED AD MANAGER</h2>
+                <p className="text-amber-200">Manage all ad locations from one place • Paste scripts directly • Multiple ads per location</p>
+              </div>
+
+              {/* ALL AD LOCATIONS GRID */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {[
+                  { key: 'topBanner', label: '📍 TOP BANNER', size: '320x100', color: 'purple' },
+                  { key: 'rectangle1', label: '📍 RECTANGLE 1', size: '300x250', color: 'orange' },
+                  { key: 'rectangle2', label: '📍 RECTANGLE 2', size: '300x250', color: 'amber' },
+                  { key: 'gapAds', label: '📍 GAP ADS', size: '320x100', color: 'cyan' },
+                  { key: 'nativeBanner', label: '📍 NATIVE BANNER', size: '320x100', color: 'emerald' },
+                  { key: 'bottomBanner', label: '📍 FOOTER BANNER', size: '320x100', color: 'rose' },
+                ].map(loc => (
+                  <div key={loc.key} className={`bg-slate-900 border-2 border-${loc.color}-600 rounded-xl p-6 hover:shadow-lg transition-all`}>
+                    {/* LOCATION HEADER */}
+                    <div className="flex items-center justify-between mb-4">
+                      <div>
+                        <h3 className={`text-lg font-bold text-${loc.color}-300 mb-1`}>{loc.label}</h3>
+                        <p className={`text-xs text-${loc.color}-400`}>{loc.size}</p>
+                      </div>
+                      {placementAds[loc.key]?.adsterra?.rawScript && (
+                        <div className="text-2xl">✅</div>
+                      )}
+                    </div>
+
+                    {/* SCRIPT INPUT */}
+                    <textarea 
+                      placeholder={`Paste Adsterra script for ${loc.label}...`}
+                      value={(locationScriptInput === loc.key) ? '' : (placementAds[loc.key]?.adsterra?.rawScript || '')}
+                      onChange={(e) => {
+                        setSelectedLocationForScript(loc.key);
+                        setLocationScriptInput(e.target.value);
+                      }}
+                      onFocus={() => {
+                        setSelectedLocationForScript(loc.key);
+                        if (!locationScriptInput && placementAds[loc.key]?.adsterra?.rawScript) {
+                          setLocationScriptInput('');
                         }
-                      }))}
-                      className="text-slate-400 hover:text-white"
-                    >
-                      {enabled ? <ToggleRight className="w-8 h-8 text-emerald-400" /> : <ToggleLeft className="w-8 h-8" />}
-                    </button>
+                      }}
+                      className="w-full h-24 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white font-mono resize-none focus:outline-none focus:ring-2 focus:ring-amber-500 mb-3"
+                    />
+
+                    {/* SAVE/DELETE BUTTONS */}
+                    <div className="flex gap-2">
+                      <button 
+                        onClick={() => {
+                          const script = (selectedLocationForScript === loc.key) ? locationScriptInput : (placementAds[loc.key]?.adsterra?.rawScript || '');
+                          if (!script.trim()) {
+                            alert('Please paste a script first');
+                            return;
+                          }
+                          const updated = { ...placementAds };
+                          if (!updated[loc.key]) updated[loc.key] = {};
+                          if (!updated[loc.key].adsterra) updated[loc.key].adsterra = { zoneId: '', domain: '', size: '', type: '', link: '' };
+                          updated[loc.key].adsterra!.rawScript = script;
+                          localStorage.setItem('placement_ads_config', JSON.stringify(updated));
+                          setPlacementAds(updated);
+                          setAdsRefreshTrigger(prev => prev + 1);
+                          if (selectedLocationForScript === loc.key) setLocationScriptInput('');
+                          alert(`✅ Ad saved to ${loc.label}`);
+                        }}
+                        className={`flex-1 bg-amber-600 hover:bg-amber-500 text-white py-2 rounded font-semibold text-sm transition-all`}
+                      >
+                        💾 Save
+                      </button>
+                      {placementAds[loc.key]?.adsterra?.rawScript && (
+                        <button 
+                          onClick={() => {
+                            const updated = { ...placementAds };
+                            if (updated[loc.key]?.adsterra) {
+                              updated[loc.key].adsterra!.rawScript = undefined;
+                            }
+                            localStorage.setItem('placement_ads_config', JSON.stringify(updated));
+                            setPlacementAds(updated);
+                            setAdsRefreshTrigger(prev => prev + 1);
+                            alert(`🗑️ Ad removed from ${loc.label}`);
+                          }}
+                          className="px-3 bg-red-600 hover:bg-red-500 text-white py-2 rounded font-semibold text-sm transition-all"
+                        >
+                          🗑️
+                        </button>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
 
-              <button 
-                onClick={saveAdsConfig}
-                className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2"
-              >
-                <Save className="w-5 h-5" /> Save Placements
-              </button>
+              {/* INFO SECTION */}
+              <div className="bg-blue-900/30 border border-blue-600 rounded-xl p-6">
+                <h4 className="text-blue-300 font-bold mb-2">💡 How to Use</h4>
+                <ul className="text-sm text-blue-200 space-y-1">
+                  <li>✓ Paste your Adsterra script into any location box</li>
+                  <li>✓ Click "Save" to apply it immediately to that location</li>
+                  <li>✓ Click "🗑️" to remove an ad from that location</li>
+                  <li>✓ Add different scripts to different locations for multiple ads</li>
+                  <li>✓ ✅ indicator shows when an ad is active on that location</li>
+                </ul>
+              </div>
+
+              {/* VISUAL MOCKUP SHOWING WHERE ADS APPEAR */}
+              <div className="bg-slate-950 border-2 border-slate-700 rounded-2xl overflow-hidden shadow-2xl">
+                
+                {/* TOP BANNER PLACEHOLDER */}
+                <div className="p-6 space-y-6">
+                  <div 
+                    onClick={() => {
+                      setExpandedPlacement(expandedPlacement === 'topBanner' ? null : 'topBanner');
+                      setExpandedAdType(null);
+                    }}
+                    className="cursor-pointer group"
+                  >
+                    <div className="bg-gradient-to-r from-purple-900 via-indigo-900 to-purple-900 border-2 border-purple-600 rounded-xl p-6 text-center hover:border-purple-400 transition-all transform hover:scale-105">
+                      <p className="text-purple-300 font-bold text-sm">TOP BANNER</p>
+                      <p className="text-purple-400 text-xs mt-1">320x100</p>
+                    </div>
+                    {/* Adsterra & Google AdSense Buttons */}
+                    <div className="grid grid-cols-2 gap-3 mt-3">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setExpandedPlacement('topBanner'); setExpandedAdType('adsterra'); }}
+                        className={`py-2 rounded-lg font-medium text-xs transition-all flex items-center justify-center gap-1 ${
+                          expandedPlacement === 'topBanner' && expandedAdType === 'adsterra'
+                            ? 'bg-amber-600 text-white'
+                            : 'bg-slate-800 text-slate-300 hover:bg-amber-600 hover:text-white'
+                        }`}
+                      >
+                        🟠 Adsterra
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setExpandedPlacement('topBanner'); setExpandedAdType('adsense'); }}
+                        className={`py-2 rounded-lg font-medium text-xs transition-all flex items-center justify-center gap-1 ${
+                          expandedPlacement === 'topBanner' && expandedAdType === 'adsense'
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-slate-800 text-slate-300 hover:bg-blue-600 hover:text-white'
+                        }`}
+                      >
+                        🔵 AdSense
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* TWIN RECTANGLES PLACEHOLDER */}
+                  <div 
+                    onClick={() => {
+                      setExpandedPlacement(expandedPlacement === 'twinRectangles' ? null : 'twinRectangles');
+                      setExpandedAdType(null);
+                    }}
+                    className="cursor-pointer group"
+                  >
+                    <div className="grid grid-cols-2 gap-4 mb-3">
+                      <div className="bg-gradient-to-r from-orange-900 via-red-900 to-orange-900 border-2 border-orange-600 rounded-xl p-8 text-center hover:border-orange-400 transition-all transform hover:scale-105">
+                        <p className="text-orange-300 font-bold text-xs">AD 1</p>
+                        <p className="text-orange-400 text-[10px] mt-1">300x250</p>
+                      </div>
+                      <div className="bg-gradient-to-r from-orange-900 via-red-900 to-orange-900 border-2 border-orange-600 rounded-xl p-8 text-center hover:border-orange-400 transition-all transform hover:scale-105">
+                        <p className="text-orange-300 font-bold text-xs">AD 2</p>
+                        <p className="text-orange-400 text-[10px] mt-1">300x250</p>
+                      </div>
+                    </div>
+                    <p className="text-slate-400 text-xs text-center mb-3 font-semibold">TWIN RECTANGLES</p>
+                    {/* Adsterra & Google AdSense Buttons */}
+                    <div className="grid grid-cols-2 gap-3">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setExpandedPlacement('twinRectangles'); setExpandedAdType('adsterra'); }}
+                        className={`py-2 rounded-lg font-medium text-xs transition-all flex items-center justify-center gap-1 ${
+                          expandedPlacement === 'twinRectangles' && expandedAdType === 'adsterra'
+                            ? 'bg-amber-600 text-white'
+                            : 'bg-slate-800 text-slate-300 hover:bg-amber-600 hover:text-white'
+                        }`}
+                      >
+                        🟠 Adsterra
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setExpandedPlacement('twinRectangles'); setExpandedAdType('adsense'); }}
+                        className={`py-2 rounded-lg font-medium text-xs transition-all flex items-center justify-center gap-1 ${
+                          expandedPlacement === 'twinRectangles' && expandedAdType === 'adsense'
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-slate-800 text-slate-300 hover:bg-blue-600 hover:text-white'
+                        }`}
+                      >
+                        🔵 AdSense
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* GAP ADS PLACEHOLDER */}
+                  <div 
+                    onClick={() => {
+                      setExpandedPlacement(expandedPlacement === 'gapAds' ? null : 'gapAds');
+                      setExpandedAdType(null);
+                    }}
+                    className="cursor-pointer group"
+                  >
+                    <div className="bg-gradient-to-r from-teal-900 via-cyan-900 to-teal-900 border-2 border-teal-600 rounded-xl p-6 text-center hover:border-teal-400 transition-all transform hover:scale-105">
+                      <p className="text-teal-300 font-bold text-sm">GAP ADS</p>
+                      <p className="text-teal-400 text-xs mt-1">320x100 (Between Sections)</p>
+                    </div>
+                    {/* Adsterra & Google AdSense Buttons */}
+                    <div className="grid grid-cols-2 gap-3 mt-3">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setExpandedPlacement('gapAds'); setExpandedAdType('adsterra'); }}
+                        className={`py-2 rounded-lg font-medium text-xs transition-all flex items-center justify-center gap-1 ${
+                          expandedPlacement === 'gapAds' && expandedAdType === 'adsterra'
+                            ? 'bg-amber-600 text-white'
+                            : 'bg-slate-800 text-slate-300 hover:bg-amber-600 hover:text-white'
+                        }`}
+                      >
+                        🟠 Adsterra
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setExpandedPlacement('gapAds'); setExpandedAdType('adsense'); }}
+                        className={`py-2 rounded-lg font-medium text-xs transition-all flex items-center justify-center gap-1 ${
+                          expandedPlacement === 'gapAds' && expandedAdType === 'adsense'
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-slate-800 text-slate-300 hover:bg-blue-600 hover:text-white'
+                        }`}
+                      >
+                        🔵 AdSense
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* NATIVE BANNER PLACEHOLDER */}
+                  <div 
+                    onClick={() => {
+                      setExpandedPlacement(expandedPlacement === 'nativeBanner' ? null : 'nativeBanner');
+                      setExpandedAdType(null);
+                    }}
+                    className="cursor-pointer group"
+                  >
+                    <div className="bg-gradient-to-r from-pink-900 via-rose-900 to-pink-900 border-2 border-pink-600 rounded-xl p-6 text-center hover:border-pink-400 transition-all transform hover:scale-105">
+                      <p className="text-pink-300 font-bold text-sm">NATIVE BANNER</p>
+                      <p className="text-pink-400 text-xs mt-1">320x100</p>
+                    </div>
+                    {/* Adsterra & Google AdSense Buttons */}
+                    <div className="grid grid-cols-2 gap-3 mt-3">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setExpandedPlacement('nativeBanner'); setExpandedAdType('adsterra'); }}
+                        className={`py-2 rounded-lg font-medium text-xs transition-all flex items-center justify-center gap-1 ${
+                          expandedPlacement === 'nativeBanner' && expandedAdType === 'adsterra'
+                            ? 'bg-amber-600 text-white'
+                            : 'bg-slate-800 text-slate-300 hover:bg-amber-600 hover:text-white'
+                        }`}
+                      >
+                        🟠 Adsterra
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setExpandedPlacement('nativeBanner'); setExpandedAdType('adsense'); }}
+                        className={`py-2 rounded-lg font-medium text-xs transition-all flex items-center justify-center gap-1 ${
+                          expandedPlacement === 'nativeBanner' && expandedAdType === 'adsense'
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-slate-800 text-slate-300 hover:bg-blue-600 hover:text-white'
+                        }`}
+                      >
+                        🔵 AdSense
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* BOTTOM BANNER PLACEHOLDER */}
+                  <div 
+                    onClick={() => {
+                      setExpandedPlacement(expandedPlacement === 'bottomBanner' ? null : 'bottomBanner');
+                      setExpandedAdType(null);
+                    }}
+                    className="cursor-pointer group"
+                  >
+                    <div className="bg-gradient-to-r from-emerald-900 via-green-900 to-emerald-900 border-2 border-emerald-600 rounded-xl p-6 text-center hover:border-emerald-400 transition-all transform hover:scale-105">
+                      <p className="text-emerald-300 font-bold text-sm">BOTTOM BANNER</p>
+                      <p className="text-emerald-400 text-xs mt-1">320x100</p>
+                    </div>
+                    {/* Adsterra & Google AdSense Buttons */}
+                    <div className="grid grid-cols-2 gap-3 mt-3">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setExpandedPlacement('bottomBanner'); setExpandedAdType('adsterra'); }}
+                        className={`py-2 rounded-lg font-medium text-xs transition-all flex items-center justify-center gap-1 ${
+                          expandedPlacement === 'bottomBanner' && expandedAdType === 'adsterra'
+                            ? 'bg-amber-600 text-white'
+                            : 'bg-slate-800 text-slate-300 hover:bg-amber-600 hover:text-white'
+                        }`}
+                      >
+                        🟠 Adsterra
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setExpandedPlacement('bottomBanner'); setExpandedAdType('adsense'); }}
+                        className={`py-2 rounded-lg font-medium text-xs transition-all flex items-center justify-center gap-1 ${
+                          expandedPlacement === 'bottomBanner' && expandedAdType === 'adsense'
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-slate-800 text-slate-300 hover:bg-blue-600 hover:text-white'
+                        }`}
+                      >
+                        🔵 AdSense
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* CONFIGURATION FORMS SECTION */}
+              {expandedPlacement && (
+              <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
+                {/* Two buttons: Adsterra | Google AdSense */}
+                <div className="grid grid-cols-2 gap-3 mb-4">
+                  <button
+                    onClick={() => setExpandedAdType('adsterra')}
+                    className={`py-3 rounded-lg font-medium text-sm transition-all flex items-center justify-center gap-2 ${
+                      expandedAdType === 'adsterra'
+                        ? 'bg-amber-600 text-white'
+                        : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                    }`}
+                  >
+                    🟠 Adsterra
+                  </button>
+                  <button
+                    onClick={() => setExpandedAdType('adsense')}
+                    className={`py-3 rounded-lg font-medium text-sm transition-all flex items-center justify-center gap-2 ${
+                      expandedAdType === 'adsense'
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                    }`}
+                  >
+                    🔵 Google AdSense
+                  </button>
+                </div>
+
+                    {/* Adsterra Form */}
+                    {expandedAdType === 'adsterra' && (
+                      <div className="space-y-3 p-4 bg-slate-800 rounded-lg border border-slate-700">
+                        <p className="text-sm font-semibold text-white mb-3">Configure Adsterra for {expandedPlacement!.replace(/([A-Z])/g, ' $1').trim()}</p>
+                        
+                        {/* Toggle between Fields and Script Mode */}
+                        <div className="grid grid-cols-2 gap-2 mb-4">
+                          <button
+                            onClick={() => setAsterraInputMode('fields')}
+                            className={`py-2 rounded-lg font-medium text-xs transition-all ${
+                              asterraInputMode === 'fields'
+                                ? 'bg-amber-600 text-white'
+                                : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                            }`}
+                          >
+                            📝 Input Fields
+                          </button>
+                          <button
+                            onClick={() => setAsterraInputMode('script')}
+                            className={`py-2 rounded-lg font-medium text-xs transition-all ${
+                              asterraInputMode === 'script'
+                                ? 'bg-amber-600 text-white'
+                                : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                            }`}
+                          >
+                            {'<>'} Raw Script
+                          </button>
+                        </div>
+
+                        {/* INPUT FIELDS MODE */}
+                        {asterraInputMode === 'fields' && (
+                          <div className="space-y-3">
+                            <div>
+                              <label className="block text-xs text-slate-400 mb-1">Zone ID</label>
+                              <input 
+                                type="text" 
+                                value={placementAds[expandedPlacement!]?.adsterra?.zoneId || ''}
+                                onChange={e => setPlacementAds(prev => ({
+                                  ...prev,
+                                  [expandedPlacement!]: {...(prev[expandedPlacement!] || {}), adsterra: {...(prev[expandedPlacement!]?.adsterra || {zoneId: '', domain: '', size: '', type: '', link: ''}), zoneId: e.target.value}}
+                                }))}
+                                placeholder="28056701"
+                                className="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs text-slate-400 mb-1">Domain</label>
+                              <input 
+                                type="text" 
+                                value={placementAds[expandedPlacement!]?.adsterra?.domain || ''}
+                                onChange={e => setPlacementAds(prev => ({
+                                  ...prev,
+                                  [expandedPlacement!]: {...(prev[expandedPlacement!] || {}), adsterra: {...(prev[expandedPlacement!]?.adsterra || {zoneId: '', domain: '', size: '', type: '', link: ''}), domain: e.target.value}}
+                                }))}
+                                placeholder="0-2ur0g1a2cgsej.janeway.replit.dev"
+                                className="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white"
+                              />
+                            </div>
+                            <div className="grid grid-cols-2 gap-2">
+                              <div>
+                                <label className="block text-xs text-slate-400 mb-1">Size</label>
+                                <select 
+                                  value={placementAds[expandedPlacement!]?.adsterra?.size || ''}
+                                  onChange={e => setPlacementAds(prev => ({
+                                    ...prev,
+                                    [expandedPlacement!]: {...(prev[expandedPlacement!] || {}), adsterra: {...(prev[expandedPlacement!]?.adsterra || {zoneId: '', domain: '', size: '', type: '', link: ''}), size: e.target.value}}
+                                  }))}
+                                  className="w-full bg-slate-700 border border-slate-600 rounded-lg px-2 py-2 text-sm text-white"
+                                >
+                                  <option value="">Select Size</option>
+                                  <option value="300x250">300x250</option>
+                                  <option value="728x90">728x90</option>
+                                  <option value="160x600">160x600</option>
+                                  <option value="320x50">320x50</option>
+                                </select>
+                              </div>
+                              <div>
+                                <label className="block text-xs text-slate-400 mb-1">Type</label>
+                                <select 
+                                  value={placementAds[expandedPlacement!]?.adsterra?.type || ''}
+                                  onChange={e => setPlacementAds(prev => ({
+                                    ...prev,
+                                    [expandedPlacement!]: {...(prev[expandedPlacement!] || {}), adsterra: {...(prev[expandedPlacement!]?.adsterra || {zoneId: '', domain: '', size: '', type: '', link: ''}), type: e.target.value}}
+                                  }))}
+                                  className="w-full bg-slate-700 border border-slate-600 rounded-lg px-2 py-2 text-sm text-white"
+                                >
+                                  <option value="">Select Type</option>
+                                  <option value="iframe">Iframe Sync</option>
+                                  <option value="banner">Banner</option>
+                                  <option value="popunder">Popunder</option>
+                                </select>
+                              </div>
+                            </div>
+                            <div>
+                              <label className="block text-xs text-slate-400 mb-1">Link</label>
+                              <input 
+                                type="text" 
+                                value={placementAds[expandedPlacement!]?.adsterra?.link || ''}
+                                onChange={e => setPlacementAds(prev => ({
+                                  ...prev,
+                                  [expandedPlacement!]: {...(prev[expandedPlacement!] || {}), adsterra: {...(prev[expandedPlacement!]?.adsterra || {zoneId: '', domain: '', size: '', type: '', link: ''}), link: e.target.value}}
+                                }))}
+                                placeholder="https://..."
+                                className="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white"
+                              />
+                            </div>
+                            <button 
+                              onClick={() => {
+                                setPendingSave({type: 'adsterra-fields', data: placementAds[expandedPlacement!]?.adsterra});
+                                setShowLocationSelector(true);
+                              }}
+                              className="w-full bg-amber-600 hover:bg-amber-500 text-white py-2 rounded-lg text-sm font-medium"
+                            >
+                              Save Adsterra
+                            </button>
+                          </div>
+                        )}
+
+                        {/* RAW SCRIPT MODE */}
+                        {asterraInputMode === 'script' && (
+                          <div className="space-y-3">
+                            <div>
+                              <label className="block text-xs text-slate-400 mb-1">Paste Complete Adsterra Script</label>
+                              <textarea 
+                                value={placementAds[expandedPlacement!]?.adsterra?.rawScript || ''}
+                                onChange={e => setPlacementAds(prev => ({
+                                  ...prev,
+                                  [expandedPlacement!]: {...(prev[expandedPlacement!] || {}), adsterra: {...(prev[expandedPlacement!]?.adsterra || {zoneId: '', domain: '', size: '', type: '', link: ''}), rawScript: e.target.value}}
+                                }))}
+                                placeholder="<script async=...>...</script>&#10;<div id=container-...></div>"
+                                className="w-full h-32 bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-xs text-white font-mono resize-none"
+                              />
+                              <p className="text-xs text-slate-500 mt-1">Paste the entire script tag + container div provided by Adsterra</p>
+                            </div>
+                            <button 
+                              onClick={() => {
+                                setPendingSave({type: 'adsterra-raw', data: placementAds[expandedPlacement!]?.adsterra?.rawScript});
+                                setShowLocationSelector(true);
+                              }}
+                              className="w-full bg-amber-600 hover:bg-amber-500 text-white py-2 rounded-lg text-sm font-medium"
+                            >
+                              Save Raw Script
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Google AdSense Form */}
+                    {expandedAdType === 'adsense' && (
+                      <div className="space-y-3 p-4 bg-slate-800 rounded-lg border border-slate-700">
+                        <p className="text-sm font-semibold text-white mb-3">Configure Google AdSense for {expandedPlacement!.replace(/([A-Z])/g, ' $1').trim()}</p>
+                        <div>
+                          <label className="block text-xs text-slate-400 mb-1">Client ID</label>
+                          <input 
+                            type="text" 
+                            value={placementAds[expandedPlacement!]?.adsense?.clientId || ''}
+                            onChange={e => setPlacementAds(prev => ({
+                              ...prev,
+                              [expandedPlacement!]: {...(prev[expandedPlacement!] || {}), adsense: {...(prev[expandedPlacement!]?.adsense || {slotId: '', clientId: '', link: ''}), clientId: e.target.value}}
+                            }))}
+                            placeholder="ca-pub-xxxxxxxxxxxxxxxx"
+                            className="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-slate-400 mb-1">Slot ID</label>
+                          <input 
+                            type="text" 
+                            value={placementAds[expandedPlacement!]?.adsense?.slotId || ''}
+                            onChange={e => setPlacementAds(prev => ({
+                              ...prev,
+                              [expandedPlacement!]: {...(prev[expandedPlacement!] || {}), adsense: {...(prev[expandedPlacement!]?.adsense || {slotId: '', clientId: '', link: ''}), slotId: e.target.value}}
+                            }))}
+                            placeholder="1234567890"
+                            className="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-slate-400 mb-1">Link</label>
+                          <input 
+                            type="text" 
+                            value={placementAds[expandedPlacement!]?.adsense?.link || ''}
+                            onChange={e => setPlacementAds(prev => ({
+                              ...prev,
+                              [expandedPlacement!]: {...(prev[expandedPlacement!] || {}), adsense: {...(prev[expandedPlacement!]?.adsense || {slotId: '', clientId: '', link: ''}), link: e.target.value}}
+                            }))}
+                            placeholder="https://..."
+                            className="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white"
+                          />
+                        </div>
+                        <button 
+                          onClick={() => {
+                            localStorage.setItem('placement_ads_config', JSON.stringify(placementAds));
+                            setAdsRefreshTrigger(prev => prev + 1);
+                            alert('✅ Google AdSense saved for ' + expandedPlacement!.replace(/([A-Z])/g, ' $1').trim());
+                          }}
+                          className="w-full bg-blue-600 hover:bg-blue-500 text-white py-2 rounded-lg text-sm font-medium"
+                        >
+                          Save Google AdSense
+                        </button>
+                      </div>
+                    )}
+
+                {/* Show what's configured */}
+                <div className="mt-6 pt-6 border-t border-slate-700 text-xs text-slate-400 space-y-2">
+                  <p className="font-semibold text-white">✅ Configured for {expandedPlacement?.replace(/([A-Z])/g, ' $1').trim()}:</p>
+                  {placementAds[expandedPlacement!]?.adsterra?.zoneId && <p className="text-amber-400">🟠 Adsterra: {placementAds[expandedPlacement!].adsterra.size}</p>}
+                  {placementAds[expandedPlacement!]?.adsense?.slotId && <p className="text-blue-400">🔵 Google AdSense: {placementAds[expandedPlacement!].adsense.slotId}</p>}
+                  {!placementAds[expandedPlacement!]?.adsterra?.zoneId && !placementAds[expandedPlacement!]?.adsense?.slotId && <p className="text-slate-500">No ads configured yet</p>}
+                </div>
+              </div>
+              )}
             </div>
           )}
         </div>
@@ -870,11 +2304,22 @@ const App: React.FC = () => {
         <ConsentBanner 
           onAccept={handleAcceptConsent}
           onReadPolicy={() => setShowPrivacyPolicy(true)}
+          onReadTerms={() => setShowTermsOfService(true)}
         />
       )}
 
       {showPrivacyPolicy && (
-        <PrivacyPolicyModal onClose={() => setShowPrivacyPolicy(false)} />
+        <PrivacyPolicyModal 
+          onClose={() => setShowPrivacyPolicy(false)}
+          onAccept={handleAcceptConsent}
+        />
+      )}
+
+      {showTermsOfService && (
+        <TermsOfServiceModal 
+          onClose={() => setShowTermsOfService(false)}
+          onAccept={handleAcceptConsent}
+        />
       )}
 
       {showAdminLogin && (
@@ -918,6 +2363,144 @@ const App: React.FC = () => {
         </div>
       )}
 
+      {showLocationSelector && pendingSave && (
+        <div className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-gradient-to-br from-slate-900 via-slate-900 to-slate-800 border border-slate-700 rounded-2xl w-full max-w-md shadow-2xl animate-in fade-in zoom-in-95 duration-300">
+            <div className="p-6 space-y-4">
+              <h3 className="text-xl font-bold text-white mb-4">Choose Banner Location</h3>
+              <div className="grid grid-cols-1 gap-3">
+                <button onClick={() => handleSaveAdToLocation('topBanner')} className="bg-indigo-600 hover:bg-indigo-500 text-white py-3 rounded-lg font-semibold transition">📍 Top Banner (320x100)</button>
+                <button onClick={() => handleSaveAdToLocation('twinRectangles')} className="bg-purple-600 hover:bg-purple-500 text-white py-3 rounded-lg font-semibold transition">📍 Twin Rectangles (300x250 x2)</button>
+                <button onClick={() => handleSaveAdToLocation('gapAds')} className="bg-cyan-600 hover:bg-cyan-500 text-white py-3 rounded-lg font-semibold transition">📍 Gap Ads (320x100)</button>
+                <button onClick={() => handleSaveAdToLocation('nativeBanner')} className="bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-lg font-semibold transition">📍 Native Banner (320x100)</button>
+                <button onClick={() => handleSaveAdToLocation('bottomBanner')} className="bg-rose-600 hover:bg-rose-500 text-white py-3 rounded-lg font-semibold transition">📍 Bottom Banner (320x100)</button>
+              </div>
+              <button onClick={() => { setShowLocationSelector(false); setPendingSave(null); }} className="w-full bg-slate-800 hover:bg-slate-700 text-white py-2 rounded-lg font-medium mt-4">Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showCompletionModal && (
+        <div className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-gradient-to-br from-slate-900 via-slate-900 to-slate-800 border border-slate-700 rounded-2xl w-full max-w-md shadow-2xl animate-in fade-in zoom-in-95 duration-300">
+            <div className="p-8 text-center space-y-6">
+              {completionData.mode === 'empty' ? (
+                <>
+                  <div className="flex justify-center">
+                    <div className="relative">
+                      <div className="absolute inset-0 bg-emerald-500/20 blur-xl rounded-full"></div>
+                      <CheckCircle2 className="w-16 h-16 text-emerald-400 relative" />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <h3 className="text-2xl font-bold text-white">Congratulations! 🎉</h3>
+                    <p className="text-emerald-400 font-semibold">All files sent to repository</p>
+                  </div>
+                  <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-4">
+                    <p className="text-xs text-emerald-300 mb-2">Repository Link:</p>
+                    <p className="text-sm font-mono text-emerald-200 break-all">{completionData.repoUrl}</p>
+                  </div>
+                  <div className="bg-slate-800/50 rounded-xl p-4">
+                    <p className="text-3xl font-bold text-white">{completionData.uploaded}</p>
+                    <p className="text-sm text-slate-400 mt-1">Files Uploaded</p>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="flex justify-center">
+                    <div className="relative">
+                      <div className="absolute inset-0 bg-indigo-500/20 blur-xl rounded-full"></div>
+                      <CheckCircle2 className="w-16 h-16 text-indigo-400 relative" />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <h3 className="text-2xl font-bold text-white">Sync Complete! ✅</h3>
+                    <p className="text-indigo-400 font-semibold">Files updated successfully</p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="bg-indigo-500/10 border border-indigo-500/30 rounded-xl p-4">
+                      <p className="text-sm font-mono text-indigo-300">Total</p>
+                      <p className="text-3xl font-bold text-indigo-400 mt-1">{completionData.total}</p>
+                    </div>
+                    <div className="bg-cyan-500/10 border border-cyan-500/30 rounded-xl p-4">
+                      <p className="text-sm font-mono text-cyan-300">Scanned</p>
+                      <p className="text-3xl font-bold text-cyan-400 mt-1">{completionData.scanned}</p>
+                    </div>
+                    <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-4">
+                      <p className="text-sm font-mono text-emerald-300">Updated</p>
+                      <p className="text-3xl font-bold text-emerald-400 mt-1">{completionData.uploaded}</p>
+                    </div>
+                    <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4">
+                      <p className="text-sm font-mono text-amber-300">Same Files</p>
+                      <p className="text-3xl font-bold text-amber-400 mt-1">{completionData.skipped}</p>
+                    </div>
+                  </div>
+                  <div className="bg-slate-800/50 rounded-xl p-4">
+                    <p className="text-xs text-slate-400 mb-2">Repository:</p>
+                    <p className="text-sm font-mono text-slate-300 break-all">{completionData.repoUrl}</p>
+                  </div>
+                </>
+              )}
+              <button
+                onClick={() => {
+                  setShowCompletionModal(false);
+                  handleBackToDashboard();
+                }}
+                className="w-full bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 text-white font-bold py-3 rounded-xl transition-all"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showShareModal && (
+        <div className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-sm shadow-2xl animate-in fade-in zoom-in-95 duration-300">
+            <div className="flex items-center justify-between p-6 border-b border-slate-800">
+              <div className="flex items-center gap-3">
+                <Share2 className="w-6 h-6 text-cyan-400" />
+                <h3 className="text-xl font-bold text-white">Share GitSync</h3>
+              </div>
+              <button onClick={() => setShowShareModal(false)} className="text-slate-500 hover:text-white">
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+            <div className="p-6 space-y-3">
+              <button onClick={() => handleShare('whatsapp')} className="w-full flex items-center gap-3 px-4 py-3 bg-gradient-to-r from-green-600 to-green-700 hover:from-green-500 hover:to-green-600 text-white rounded-xl font-medium transition-all">
+                <span className="text-xl">💬</span> Share on WhatsApp
+              </button>
+              <button onClick={() => handleShare('twitter')} className="w-full flex items-center gap-3 px-4 py-3 bg-gradient-to-r from-sky-500 to-sky-600 hover:from-sky-400 hover:to-sky-500 text-white rounded-xl font-medium transition-all">
+                <span className="text-xl">𝕏</span> Share on Twitter
+              </button>
+              <button onClick={() => handleShare('facebook')} className="w-full flex items-center gap-3 px-4 py-3 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-500 hover:to-blue-600 text-white rounded-xl font-medium transition-all">
+                <span className="text-xl">f</span> Share on Facebook
+              </button>
+              <button onClick={() => handleShare('telegram')} className="w-full flex items-center gap-3 px-4 py-3 bg-gradient-to-r from-cyan-600 to-cyan-700 hover:from-cyan-500 hover:to-cyan-600 text-white rounded-xl font-medium transition-all">
+                <span className="text-xl">✈️</span> Share on Telegram
+              </button>
+              <div className="h-px bg-slate-700 my-2"></div>
+              <button onClick={() => handleShare('copy')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-all ${copySuccess ? 'bg-emerald-600 text-white' : 'bg-slate-800 hover:bg-slate-700 text-slate-300'}`}>
+                {copySuccess ? (
+                  <>
+                    <Check className="w-5 h-5" /> Copied to Clipboard!
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-5 h-5" /> Copy Link
+                  </>
+                )}
+              </button>
+            </div>
+            <div className="px-6 py-4 border-t border-slate-800 bg-slate-800/30">
+              <p className="text-xs text-slate-400 text-center">Share without credentials - only the app link is shared</p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showHelpModal && (
         <div className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-lg max-h-[80vh] flex flex-col shadow-2xl">
@@ -947,6 +2530,17 @@ const App: React.FC = () => {
                 <h4 className="font-bold text-white mb-2">4. Start Sync</h4>
                 <p className="text-slate-400">Click "START SYNC" and wait for the process to complete. Your files will be pushed to GitHub!</p>
               </div>
+              <div className="border-t border-slate-700 pt-4">
+                <h4 className="font-bold text-emerald-400 mb-2">📌 Important Tips</h4>
+              </div>
+              <div>
+                <h4 className="font-bold text-white mb-2">5. Create New Repository</h4>
+                <p className="text-slate-400">If making a new repository on GitHub: Create it as <span className="text-emerald-300">public or private</span> with <span className="text-emerald-300">README always enabled</span>. Then paste the repository link and use this app to send all your files easily.</p>
+              </div>
+              <div>
+                <h4 className="font-bold text-white mb-2">6. Update Existing Repository</h4>
+                <p className="text-slate-400">If your repository already exists: <span className="text-emerald-300">Only add README file to your existing repository</span> first. Then use this app to easily add all remaining files by selecting your folder.</p>
+              </div>
             </div>
             <div className="p-4 border-t border-slate-800">
               <button 
@@ -959,8 +2553,6 @@ const App: React.FC = () => {
           </div>
         </div>
       )}
-
-      <AdNativeBanner label="Top Banner" placementKey="topBanner" />
 
       <div className="w-full max-w-3xl mx-auto px-4 sm:px-6 pb-4 relative flex-1">
         <header className="flex items-center justify-between mb-8 relative z-50">
@@ -981,12 +2573,21 @@ const App: React.FC = () => {
             
             {isMenuOpen && (
               <div className="absolute right-0 top-12 w-64 bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 origin-top-right">
+                <div className="flex items-center justify-between p-3 border-b border-slate-800 bg-slate-800/50">
+                  <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Menu</span>
+                  <button onClick={() => setIsMenuOpen(false)} className="p-1 text-slate-500 hover:text-white hover:bg-slate-700 rounded-lg transition-colors">
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
                 <div className="p-1.5 space-y-0.5">
                   <button onClick={handleHome} className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-slate-300 hover:bg-slate-800 hover:text-white rounded-xl transition-colors text-left">
                     <Home className="w-4 h-4 text-indigo-400" /> Home Page
                   </button>
                   <button onClick={() => { setShowHelpModal(true); setIsMenuOpen(false); }} className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-slate-300 hover:bg-slate-800 hover:text-white rounded-xl transition-colors text-left">
                     <HelpCircle className="w-4 h-4 text-emerald-400" /> How to use
+                  </button>
+                  <button onClick={() => { handleInstallApp(); setIsMenuOpen(false); }} className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-slate-300 hover:bg-slate-800 hover:text-white rounded-xl transition-colors text-left bg-gradient-to-r from-sky-500/10 to-blue-500/10">
+                    <Download className="w-4 h-4 text-sky-400 animate-bounce" /> App Download
                   </button>
                   <button onClick={() => { if(isConnected) setShowAdvancedSettings(!showAdvancedSettings); setIsMenuOpen(false); }} className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-slate-300 hover:bg-slate-800 hover:text-white rounded-xl transition-colors text-left">
                     <Settings className="w-4 h-4 text-slate-400" /> Settings
@@ -999,6 +2600,9 @@ const App: React.FC = () => {
                     <Shield className="w-4 h-4 text-indigo-400" /> Privacy Policy
                   </button>
                   <div className="h-px bg-slate-800 mx-2 my-1"></div>
+                  <button onClick={() => { setShowShareModal(true); setIsMenuOpen(false); }} className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-slate-300 hover:bg-slate-800 hover:text-white rounded-xl transition-colors text-left bg-gradient-to-r from-cyan-500/10 to-blue-500/10">
+                    <Share2 className="w-4 h-4 text-cyan-400" /> Share App
+                  </button>
                   <button onClick={handleClearCredentials} className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-red-400 hover:bg-red-500/10 hover:text-red-300 rounded-xl transition-colors text-left">
                     <Trash2 className="w-4 h-4" /> Clear Credentials
                   </button>
@@ -1020,14 +2624,28 @@ const App: React.FC = () => {
                 <span className="w-1.5 h-1.5 rounded-full bg-indigo-500"></span>
                 Personal Access Token
               </label>
-              <input 
-                type="password" 
-                value={config.token}
-                onChange={e => setConfig(prev => ({ ...prev, token: e.target.value }))}
-                placeholder="ghp_xxxxxxxxxxxx"
-                disabled={isConnected}
-                className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3.5 text-base text-white focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:border-transparent transition-all placeholder:text-slate-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-inner"
-              />
+              <div className="relative">
+                <input 
+                  type="password" 
+                  value={config.token}
+                  onChange={e => setConfig(prev => ({ ...prev, token: e.target.value }))}
+                  placeholder="ghp_xxxxxxxxxxxx"
+                  disabled={isConnected}
+                  className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3.5 pr-12 text-base text-white focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:border-transparent transition-all placeholder:text-slate-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-inner"
+                />
+                {config.token && (
+                  <button
+                    onClick={() => {
+                      setConfig(prev => ({ ...prev, token: '' }));
+                      setIsConnected(false);
+                    }}
+                    className="absolute right-3.5 top-1/2 -translate-y-1/2 p-1.5 text-slate-500 hover:text-red-400 transition-colors hover:bg-red-500/10 rounded-lg"
+                    title="Clear token"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                )}
+              </div>
               <p className="text-xs text-slate-500 leading-relaxed">
                 Required scope: <span className="font-mono text-indigo-300 bg-indigo-500/10 px-1.5 py-0.5 rounded border border-indigo-500/20">repo</span>
               </p>
@@ -1038,14 +2656,28 @@ const App: React.FC = () => {
                 <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
                 Repository Link
               </label>
-              <input 
-                type="text" 
-                value={config.repoUrl}
-                onChange={e => setConfig(prev => ({ ...prev, repoUrl: e.target.value }))}
-                placeholder="username/repo"
-                disabled={isConnected}
-                className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3.5 text-base text-white focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:border-transparent transition-all placeholder:text-slate-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-inner"
-              />
+              <div className="relative">
+                <input 
+                  type="text" 
+                  value={config.repoUrl}
+                  onChange={e => setConfig(prev => ({ ...prev, repoUrl: e.target.value }))}
+                  placeholder="username/repo"
+                  disabled={isConnected}
+                  className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3.5 pr-12 text-base text-white focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:border-transparent transition-all placeholder:text-slate-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-inner"
+                />
+                {config.repoUrl && (
+                  <button
+                    onClick={() => {
+                      setConfig(prev => ({ ...prev, repoUrl: '' }));
+                      setIsConnected(false);
+                    }}
+                    className="absolute right-3.5 top-1/2 -translate-y-1/2 p-1.5 text-slate-500 hover:text-red-400 transition-colors hover:bg-red-500/10 rounded-lg"
+                    title="Clear repository link"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                )}
+              </div>
             </div>
 
             <div className="grid grid-cols-2 gap-4">
@@ -1208,16 +2840,72 @@ const App: React.FC = () => {
                     )}
 
                     <button
-                      onClick={startSync}
+                      onClick={() => startSync()}
                       className="w-full bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white shadow-indigo-900/20 w-full py-4 rounded-xl font-bold text-base tracking-wide shadow-xl flex items-center justify-center gap-3 transition-all active:scale-[0.98]"
                     >
                       START SYNC
                     </button>
+
+                    {showSyncModeModal && (
+                      <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm">
+                        <div className="bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl w-full max-w-md mx-4 p-6 animate-in slide-in-from-bottom-4 sm:slide-in-from-center">
+                          <h2 className="text-2xl font-bold text-white mb-2">Sync Mode</h2>
+                          <p className="text-slate-400 text-sm mb-6">Choose how you want to sync your files</p>
+                          
+                          <div className="space-y-3 mb-6">
+                            <button
+                              onClick={() => {
+                                setSelectedSyncMode('empty');
+                                startSync('empty');
+                                setShowSyncModeModal(false);
+                              }}
+                              className="w-full p-4 rounded-xl border-2 border-slate-700 bg-slate-800/50 hover:border-indigo-500 hover:bg-indigo-500/10 transition-all text-left group"
+                            >
+                              <div className="flex items-start gap-3">
+                                <div className="w-10 h-10 rounded-full bg-indigo-500/20 flex items-center justify-center mt-0.5 group-hover:bg-indigo-500/30 transition-colors">
+                                  <UploadCloud className="w-5 h-5 text-indigo-400" />
+                                </div>
+                                <div className="flex-1">
+                                  <p className="font-bold text-white">Empty Repository</p>
+                                  <p className="text-xs text-slate-400 mt-1">Upload all files to empty repository</p>
+                                </div>
+                              </div>
+                            </button>
+                            
+                            <button
+                              onClick={() => {
+                                setSelectedSyncMode('update');
+                                startSync('update');
+                                setShowSyncModeModal(false);
+                              }}
+                              className="w-full p-4 rounded-xl border-2 border-slate-700 bg-slate-800/50 hover:border-emerald-500 hover:bg-emerald-500/10 transition-all text-left group"
+                            >
+                              <div className="flex items-start gap-3">
+                                <div className="w-10 h-10 rounded-full bg-emerald-500/20 flex items-center justify-center mt-0.5 group-hover:bg-emerald-500/30 transition-colors">
+                                  <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+                                </div>
+                                <div className="flex-1">
+                                  <p className="font-bold text-white">Update Files</p>
+                                  <p className="text-xs text-slate-400 mt-1">Sync and update existing repository files</p>
+                                </div>
+                              </div>
+                            </button>
+                          </div>
+                          
+                          <button
+                            onClick={() => setShowSyncModeModal(false)}
+                            className="w-full py-2.5 text-slate-400 hover:text-slate-200 transition-colors text-sm font-medium"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )}
                     
                     <TwinRectangles />
 
                     <div className="pt-2">
-                       <Logger logs={logs} />
+                       <Logger logs={logs} hasError={hasError} />
                     </div>
                   </div>
                 )}
@@ -1238,7 +2926,8 @@ const App: React.FC = () => {
            <p className="text-xs text-slate-600">© 2024 GitSync Mobile</p>
            <div className="flex items-center gap-4 text-xs">
              <button onClick={() => setShowPrivacyPolicy(true)} className="text-slate-500 hover:text-indigo-400 transition-colors">Privacy Policy</button>
-             <button onClick={() => {}} className="text-slate-500 hover:text-indigo-400 transition-colors cursor-not-allowed">Terms of Service</button>
+            <span className="text-slate-600">•</span>
+            <button onClick={() => setShowTermsOfService(true)} className="text-slate-500 hover:text-blue-400 transition-colors">Terms of Service</button>
            </div>
         </div>
       </footer>

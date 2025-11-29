@@ -1,44 +1,46 @@
 import { GoogleGenAI } from "@google/genai";
 
-const API_KEY = process.env.API_KEY || '';
-
 export const generateCommitMessage = async (
   filesAdded: string[], 
   filesModified: string[], 
   filesDeleted: string[]
 ): Promise<string> => {
-  if (!API_KEY) {
-    console.warn("Gemini API Key missing, using default commit message.");
-    return "chore: sync files via GitSync Mobile";
+  let apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+  
+  if (!apiKey) {
+    try {
+      const response = await fetch('/.env');
+      const envText = await response.text();
+      const match = envText.match(/VITE_GEMINI_API_KEY=(.+)/);
+      apiKey = match ? match[1].trim() : '';
+    } catch (e) {
+      console.warn("Could not read env file");
+    }
+  }
+  
+  if (!apiKey) {
+    console.warn("Gemini API Key not configured. Using default commit message.");
+    return `chore: sync ${filesAdded.length} added, ${filesModified.length} modified, ${filesDeleted.length} deleted via GitSync`;
   }
 
   try {
-    const ai = new GoogleGenAI({ apiKey: API_KEY });
+    const ai = new GoogleGenAI({ apiKey });
     
-    const prompt = `
-      You are an expert developer writing git commit messages.
-      Based on the following file changes, generate a concise and descriptive commit message (Conventional Commits format).
-      
-      Files Added:
-      ${filesAdded.join('\n') || 'None'}
-      
-      Files Modified:
-      ${filesModified.join('\n') || 'None'}
-      
-      Files Deleted:
-      ${filesDeleted.join('\n') || 'None'}
-      
-      Output ONLY the commit message string. No markdown, no explanations.
-    `;
+    const prompt = `You are an expert developer. Generate a Conventional Commits message (one line only) for these changes:
+Added: ${filesAdded.slice(0, 3).join(', ') || 'none'}${filesAdded.length > 3 ? ` +${filesAdded.length - 3}` : ''}
+Modified: ${filesModified.slice(0, 3).join(', ') || 'none'}${filesModified.length > 3 ? ` +${filesModified.length - 3}` : ''}
+Deleted: ${filesDeleted.length > 0 ? filesDeleted.length + ' files' : 'none'}
+Output ONLY the commit message, no explanation.`;
 
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
       contents: prompt,
     });
 
-    return response.text.trim();
+    const msg = response.text?.trim();
+    return msg && msg.length > 0 ? msg : `chore: sync ${filesAdded.length + filesModified.length} files`;
   } catch (error) {
-    console.error("Gemini generation failed:", error);
-    return "chore: batch update via GitSync Mobile";
+    console.warn("Gemini generation skipped:", error);
+    return `chore: sync ${filesAdded.length} added, ${filesModified.length} modified files`;
   }
 };

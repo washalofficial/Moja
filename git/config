@@ -7,6 +7,3 @@
 	url = git://gitsafe:5418/backup.git
 	fetch = +refs/heads/*:refs/remotes/gitsafe-backup/*
 	skipFetchAll = true
-[remote "origin"]
-	url = https://github.com/washalofficial/Gitsync-Mobile-plus-PC
-	fetch = +refs/heads/*:refs/remotes/origin/*

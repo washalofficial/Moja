@@ -1,11 +1,25 @@
-import React from 'react';
-import { XCircle, Shield } from 'lucide-react';
+import React, { useState } from 'react';
+import { XCircle, Shield, CheckCircle2 } from 'lucide-react';
 
 interface PrivacyPolicyModalProps {
   onClose: () => void;
+  onAccept?: () => void;
 }
 
-export const PrivacyPolicyModal: React.FC<PrivacyPolicyModalProps> = ({ onClose }) => {
+export const PrivacyPolicyModal: React.FC<PrivacyPolicyModalProps> = ({ onClose, onAccept }) => {
+  const [isAccepted, setIsAccepted] = useState(false);
+
+  const handleAccept = () => {
+    setIsAccepted(true);
+    localStorage.setItem('privacy_policy_accepted', 'true');
+    if (onAccept) {
+      onAccept();
+    }
+    setTimeout(() => {
+      onClose();
+    }, 300);
+  };
+
   return (
     <div className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-sm flex items-center justify-center p-4">
       <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-2xl h-[80vh] flex flex-col shadow-2xl relative">
@@ -86,18 +100,44 @@ export const PrivacyPolicyModal: React.FC<PrivacyPolicyModalProps> = ({ onClose 
             <p className="text-indigo-400">privacy@gitsyncmobile.com</p>
           </section>
 
-           <div className="pt-6 border-t border-slate-800 text-xs text-slate-500">
+          <div className="pt-6 border-t border-slate-800 text-xs text-slate-500">
             <p>GitSync Mobile - All Rights Reserved.</p>
           </div>
         </div>
         
-        <div className="p-4 border-t border-slate-800 bg-slate-900/50 backdrop-blur rounded-b-2xl">
-          <button 
-            onClick={onClose}
-            className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-xl transition-colors"
-          >
-            I Understand
-          </button>
+        <div className="p-4 border-t border-slate-800 bg-slate-900/50 backdrop-blur rounded-b-2xl space-y-3">
+          <div className="flex items-center gap-3 p-4 bg-indigo-500/10 border border-indigo-500/20 rounded-xl">
+            <input 
+              type="checkbox" 
+              id="accept-policy"
+              checked={isAccepted}
+              onChange={(e) => setIsAccepted(e.target.checked)}
+              className="w-5 h-5 rounded border-2 border-indigo-500 bg-slate-800 cursor-pointer accent-indigo-600"
+            />
+            <label htmlFor="accept-policy" className="text-sm text-slate-300 cursor-pointer flex-1">
+              I have read and agree to the Privacy Policy
+            </label>
+            {isAccepted && <CheckCircle2 className="w-5 h-5 text-emerald-400 flex-shrink-0" />}
+          </div>
+          <div className="flex gap-3">
+            <button 
+              onClick={onClose}
+              className="flex-1 px-4 py-2.5 text-sm font-medium text-slate-300 hover:text-white hover:bg-slate-800 rounded-xl transition-colors"
+            >
+              Close
+            </button>
+            <button 
+              onClick={handleAccept}
+              disabled={!isAccepted}
+              className={`flex-1 px-4 py-2.5 text-sm font-bold rounded-xl transition-all ${
+                isAccepted 
+                  ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-500/20 active:scale-95' 
+                  : 'bg-slate-700 text-slate-400 cursor-not-allowed opacity-50'
+              }`}
+            >
+              Accept & Continue
+            </button>
+          </div>
         </div>
       </div>
     </div>

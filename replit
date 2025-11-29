@@ -1,7 +1,4 @@
 modules = ["nodejs-20"]
-[agent]
-expertMode = true
-
 [nix]
 channel = "stable-25_05"
 packages = ["unzip"]
@@ -16,10 +13,10 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
-args = "GitSync Development Server"
+args = "Start application"
 
 [[workflows.workflow]]
-name = "GitSync Development Server"
+name = "Start application"
 author = "agent"
 
 [[workflows.workflow.tasks]]
@@ -33,3 +30,7 @@ outputType = "webview"
 [[ports]]
 localPort = 5000
 externalPort = 80
+
+[[ports]]
+localPort = 37825
+externalPort = 3000

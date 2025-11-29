@@ -1,9 +1,9 @@
-Improve file path handling for reliable GitHub synchronization
+Add configuration options for advertising
 
-Sanitize file paths using a new utility function to prevent malformed path errors during GitHub synchronization, and add Vite environment type definitions.
+Define interfaces for AdsConfig and PlacementAd, initialize adsConfig and placementAds states, and implement parsing logic for Adsterra scripts. Update AdRectangle component to safely access placement data using optional chaining.
 
 Replit-Commit-Author: Agent
-Replit-Commit-Session-Id: ecd04f93-c288-42d7-a432-9d3b4e07aa9d
+Replit-Commit-Session-Id: 031f474f-ad10-416c-9d4d-536da8f222d0
 Replit-Commit-Checkpoint-Type: full_checkpoint
-Replit-Commit-Event-Id: f3be300f-c9b3-457b-bb35-af395a235982
-Replit-Commit-Screenshot-Url: https://storage.googleapis.com/screenshot-production-us-central1/7785bca2-e2d1-4f7d-b83a-a742e2dd8551/ecd04f93-c288-42d7-a432-9d3b4e07aa9d/MRWBWPI
+Replit-Commit-Event-Id: 2580c836-3557-4d32-9f1e-350ac4345f83
+Replit-Commit-Screenshot-Url: https://storage.googleapis.com/screenshot-production-us-central1/256d09e9-c1ce-458d-8c4e-6e1922700cb1/031f474f-ad10-416c-9d4d-536da8f222d0/uFlTDng

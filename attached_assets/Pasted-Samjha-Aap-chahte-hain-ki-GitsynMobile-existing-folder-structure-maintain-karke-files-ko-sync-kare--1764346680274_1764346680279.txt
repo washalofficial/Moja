@@ -1,0 +1,379 @@
+Samjha! Aap chahte hain ki GitsynMobile existing folder structure maintain karke files ko sync kare, na ki naya folder banaye. Yeh solution hai:
+
+1. Modified Sync Engine - Structure Preservation
+
+```bash
+#!/bin/bash
+
+# GitsynMobile - Structure Preservation Mode
+TOOL_NAME="GitsynMobile"
+VERSION="2.0"
+
+# Preserve Folder Structure Sync
+SYNC_WITH_STRUCTURE() {
+    local SOURCE_PATH=$1
+    local TARGET_REPO=$2
+    
+    echo -e "${CYAN}🏗️  GitsynMobile - Structure Preservation Mode${NC}"
+    echo "================================================"
+    
+    # Extract repo name from URL
+    local REPO_NAME=$(basename "$TARGET_REPO" .git)
+    local WORKSPACE="./gitsynmobile_temp"
+    
+    # Clone repository
+    echo -e "${YELLOW}📥 Cloning repository...${NC}"
+    git clone "$TARGET_REPO" "$WORKSPACE"
+    cd "$WORKSPACE"
+    
+    # Get relative path from source
+    local RELATIVE_PATH=$(realpath --relative-to="$HOME" "$SOURCE_PATH")
+    local TARGET_DIR="$RELATIVE_PATH"
+    
+    # Remove leading ./ if present
+    TARGET_DIR="${TARGET_DIR#./}"
+    
+    echo -e "${BLUE}📁 Source: $SOURCE_PATH${NC}"
+    echo -e "${BLUE}🎯 Target Directory: $TARGET_DIR${NC}"
+    
+    # Create directory structure in repo
+    mkdir -p "$(dirname "$TARGET_DIR")"
+    
+    # Sync with rsync to preserve structure
+    echo -e "${YELLOW}🔄 Syncing files with structure preservation...${NC}"
+    rsync -av --relative "$SOURCE_PATH/./" ./
+    
+    # Alternative: Use find and cp with parent directories
+    # find "$SOURCE_PATH" -type f -exec cp --parents {} . \;
+    
+    GITSYNMOBILE_VALIDATE
+    
+    # Commit with structure info
+    git add .
+    git commit -m "📱 GitsynMobile: Preserved structure of $RELATIVE_PATH - $(date '+%Y-%m-%d %H:%M')"
+    
+    echo -e "${YELLOW}🚀 Uploading to GitHub...${NC}"
+    git push origin main
+    
+    cd ..
+    rm -rf "$WORKSPACE"
+    
+    echo -e "${GREEN}✅ Structure preserved successfully!${NC}"
+}
+```
+
+2. Path-Based Sync Options
+
+```bash
+# Multiple Sync Modes
+SELECT_SYNC_MODE() {
+    echo -e "${CYAN}🔄 Select Sync Mode${NC}"
+    echo "=================================="
+    echo "1. 📁 Preserve Full Path Structure"
+    echo "2. 🗂️  Sync to Specific Directory in Repo" 
+    echo "3. 🔄 Mirror Exact Folder Structure"
+    echo "4. 📊 Smart Structure Detection"
+    
+    read -p "🎯 Choose mode (1-4): " MODE_CHOICE
+    
+    case $MODE_CHOICE in
+        1)
+            PRESERVE_FULL_STRUCTURE
+            ;;
+        2)
+            SYNC_TO_TARGET_DIR
+            ;;
+        3)
+            MIRROR_STRUCTURE
+            ;;
+        4)
+            SMART_STRUCTURE_DETECTION
+            ;;
+        *)
+            echo -e "${RED}❌ Invalid mode${NC}"
+            ;;
+    esac
+}
+```
+
+3. Full Path Structure Preservation
+
+```bash
+PRESERVE_FULL_STRUCTURE() {
+    echo -e "${CYAN}📁 Full Path Structure Preservation${NC}"
+    echo "=========================================="
+    
+    read -p "📝 Enter source folder path: " SOURCE_PATH
+    
+    if [ ! -d "$SOURCE_PATH" ]; then
+        echo -e "${RED}❌ Source path not found!${NC}"
+        return 1
+    fi
+    
+    # Show structure preview
+    echo -e "${YELLOW}📊 Folder Structure Preview:${NC}"
+    tree "$SOURCE_PATH" -L 3
+    
+    # Calculate full path for preservation
+    local FULL_PATH=$(realpath "$SOURCE_PATH")
+    local BASE_DIR=$(dirname "$FULL_PATH")
+    
+    echo -e "${BLUE}📍 Full Path: $FULL_PATH${NC}"
+    echo -e "${BLUE}📦 Base Directory: $BASE_DIR${NC}"
+    
+    # Clone and preserve structure
+    local WORKSPACE="./gitsynmobile_workspace"
+    git clone "$REPO_URL" "$WORKSPACE"
+    cd "$WORKSPACE"
+    
+    # Copy with full path structure
+    echo -e "${YELLOW}🏗️  Copying with path preservation...${NC}"
+    find "$SOURCE_PATH" -type f -exec cp --parents {} . \;
+    
+    GITSYNMOBILE_VALIDATE
+    
+    git add .
+    git commit -m "📱 GitsynMobile: Full path structure - $(basename "$SOURCE_PATH")"
+    git push origin main
+    
+    cd ..
+    rm -rf "$WORKSPACE"
+    
+    echo -e "${GREEN}✅ Full path structure preserved!${NC}"
+}
+```
+
+4. Root-Based Sync (Files in Root of Repo)
+
+```bash
+# Sync files directly to repo root
+SYNC_TO_REPO_ROOT() {
+    local SOURCE_PATH=$1
+    
+    echo -e "${CYAN}📄 Syncing to Repository Root${NC}"
+    echo "=================================="
+    
+    local WORKSPACE="./gitsynmobile_root_sync"
+    git clone "$REPO_URL" "$WORKSPACE"
+    cd "$WORKSPACE"
+    
+    # Copy only files (not folders) to root
+    echo -e "${YELLOW}📤 Copying files to repo root...${NC}"
+    find "$SOURCE_PATH" -type f -maxdepth 1 -exec cp {} . \;
+    
+    # For subfolders, create flat structure
+    find "$SOURCE_PATH" -mindepth 2 -type f -exec sh -c '
+        file="$1"
+        base_name=$(basename "$file")
+        # Handle duplicate names
+        if [ -f "./$base_name" ]; then
+            cp "$file" "./${base_name%.*}_$(dirname "$file" | tr / _).${base_name##*.}"
+        else
+            cp "$file" ./
+        fi
+    ' _ {} \;
+    
+    GITSYNMOBILE_VALIDATE
+    
+    git add .
+    git commit -m "📱 GitsynMobile: Root sync - $(basename "$SOURCE_PATH")"
+    git push origin main
+    
+    cd ..
+    rm -rf "$WORKSPACE"
+    
+    echo -e "${GREEN}✅ Files synced to repository root!${NC}"
+}
+```
+
+5. Path-Wise Sync with Custom Mapping
+
+```bash
+# Custom path mapping
+PATH_WISE_SYNC() {
+    local SOURCE_PATH=$1
+    
+    echo -e "${CYAN}🗺️  Path-Wise Sync with Custom Mapping${NC}"
+    echo "=========================================="
+    
+    # Analyze source structure
+    echo -e "${YELLOW}🔍 Analyzing source structure...${NC}"
+    find "$SOURCE_PATH" -type d | head -10 | while read dir; do
+        echo "📁 $dir"
+    done
+    
+    # Create path mapping
+    read -p "🔧 Enter target directory in repo (leave empty for root): " TARGET_DIR
+    TARGET_DIR="${TARGET_DIR:-.}"
+    
+    local WORKSPACE="./gitsynmobile_path_sync"
+    git clone "$REPO_URL" "$WORKSPACE"
+    cd "$WORKSPACE"
+    
+    # Create target directory
+    mkdir -p "$TARGET_DIR"
+    
+    # Sync with path preservation from source
+    echo -e "${YELLOW}🔄 Syncing with path mapping...${NC}"
+    if [ "$TARGET_DIR" = "." ]; then
+        # Copy to root
+        cp -r "$SOURCE_PATH"/* ./
+    else
+        # Copy to target directory
+        cp -r "$SOURCE_PATH"/* "$TARGET_DIR/"
+    fi
+    
+    GITSYNMOBILE_VALIDATE
+    
+    git add .
+    git commit -m "📱 GitsynMobile: Path-wise sync to $TARGET_DIR"
+    git push origin main
+    
+    cd ..
+    rm -rf "$WORKSPACE"
+    
+    echo -e "${GREEN}✅ Path-wise sync completed!${NC}"
+}
+```
+
+6. Smart Structure Detection
+
+```bash
+SMART_STRUCTURE_DETECTION() {
+    local SOURCE_PATH=$1
+    
+    echo -e "${CYAN}🤖 Smart Structure Detection${NC}"
+    echo "=================================="
+    
+    # Analyze the folder structure
+    local DEPTH=$(find "$SOURCE_PATH" -type d | awk -F'/' '{print NF-1}' | sort -nu | tail -n1)
+    local FILE_COUNT=$(find "$SOURCE_PATH" -type f | wc -l)
+    local DIR_COUNT=$(find "$SOURCE_PATH" -type d | wc -l)
+    
+    echo -e "${BLUE}📊 Analysis Results:${NC}"
+    echo -e "📁 Depth: $DEPTH levels"
+    echo -e "📄 Files: $FILE_COUNT"
+    echo -e "📂 Directories: $DIR_COUNT"
+    
+    # Recommend sync strategy
+    if [ $DEPTH -le 2 ] && [ $FILE_COUNT -lt 50 ]; then
+        echo -e "${GREEN}💡 Recommendation: Sync to repo root${NC}"
+        SYNC_TO_REPO_ROOT "$SOURCE_PATH"
+    elif [ $DEPTH -gt 2 ] && [ $DIR_COUNT -gt 5 ]; then
+        echo -e "${YELLOW}💡 Recommendation: Preserve full structure${NC}"
+        PRESERVE_FULL_STRUCTURE "$SOURCE_PATH"
+    else
+        echo -e "${BLUE}💡 Recommendation: Path-wise sync${NC}"
+        PATH_WISE_SYNC "$SOURCE_PATH"
+    fi
+}
+```
+
+7. Enhanced Main Menu with Structure Options
+
+```bash
+GITSYNMOBILE_MAIN_MENU() {
+    while true; do
+        SHOW_BANNER
+        echo -e "${CYAN}🏗️  GitsynMobile - Structure Preservation${NC}"
+        echo "=========================================="
+        echo "1. 📁 Preserve Full Path Structure"
+        echo "2. 📄 Sync to Repository Root" 
+        echo "3. 🗺️  Path-Wise Custom Mapping"
+        echo "4. 🤖 Smart Structure Detection"
+        echo "5. 🔄 Mirror Complete Folder"
+        echo "6. ⚙️  Configuration"
+        echo "7. 🚪 Exit"
+        echo ""
+        
+        read -p "🎯 Select option (1-7): " CHOICE
+        
+        case $CHOICE in
+            1)
+                read -p "📝 Enter folder path: " SOURCE_PATH
+                PRESERVE_FULL_STRUCTURE "$SOURCE_PATH"
+                ;;
+            2)
+                read -p "📝 Enter folder path: " SOURCE_PATH
+                SYNC_TO_REPO_ROOT "$SOURCE_PATH"
+                ;;
+            3)
+                read -p "📝 Enter folder path: " SOURCE_PATH
+                PATH_WISE_SYNC "$SOURCE_PATH"
+                ;;
+            4)
+                read -p "📝 Enter folder path: " SOURCE_PATH
+                SMART_STRUCTURE_DETECTION "$SOURCE_PATH"
+                ;;
+            5)
+                read -p "📝 Enter folder path: " SOURCE_PATH
+                MIRROR_COMPLETE_FOLDER "$SOURCE_PATH"
+                ;;
+            6)
+                SETUP_GITSYNMOBILE
+                ;;
+            7)
+                echo -e "${GREEN}👋 Thank you for using GitsynMobile!${NC}"
+                exit 0
+                ;;
+            *)
+                echo -e "${RED}❌ Invalid option!${NC}"
+                ;;
+        esac
+        
+        echo ""
+        read -p "⏎ Press Enter to continue..."
+    done
+}
+
+# Mirror complete folder structure
+MIRROR_COMPLETE_FOLDER() {
+    local SOURCE_PATH=$1
+    local FOLDER_NAME=$(basename "$SOURCE_PATH")
+    
+    echo -e "${CYAN}🪞 Mirroring Complete Folder: $FOLDER_NAME${NC}"
+    
+    local WORKSPACE="./gitsynmobile_mirror"
+    git clone "$REPO_URL" "$WORKSPACE"
+    cd "$WORKSPACE"
+    
+    # Remove existing content and mirror
+    rm -rf ./*
+    cp -r "$SOURCE_PATH"/* ./
+    
+    GITSYNMOBILE_VALIDATE
+    
+    git add .
+    git commit -m "📱 GitsynMobile: Mirror of $FOLDER_NAME"
+    git push origin main
+    
+    cd ..
+    rm -rf "$WORKSPACE"
+    
+    echo -e "${GREEN}✅ Folder mirrored successfully!${NC}"
+}
+```
+
+8. Usage Examples
+
+```bash
+# Example 1: Preserve full mobile structure
+./gitsynmobile.sh
+# Choose: 1 (Preserve Full Path Structure)
+# Enter: /sdcard/DCIM/Camera
+# Result: Files keep their original path structure in repo
+
+# Example 2: Sync to repo root  
+./gitsynmobile.sh
+# Choose: 2 (Sync to Repository Root)
+# Enter: /sdcard/Download
+# Result: All files go to repo root, duplicates handled
+
+# Example 3: Smart detection
+./gitsynmobile.sh
+# Choose: 4 (Smart Structure Detection)
+# Enter: /sdcard/Documents/Projects
+# Result: Auto-chooses best sync strategy
+```
+
+Yeh implementation GitsynMobile ko existing folder structure maintain karke sync karne ki capability deti hai! 🚀📁

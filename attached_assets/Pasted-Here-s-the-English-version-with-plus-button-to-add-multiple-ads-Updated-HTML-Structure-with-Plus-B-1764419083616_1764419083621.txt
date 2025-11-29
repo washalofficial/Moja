@@ -1,0 +1,201 @@
+Here's the English version with plus button to add multiple ads:
+
+Updated HTML Structure with Plus Button:
+
+```html
+<div class="admin-panel">
+    <h1>Exit Admin</h1>
+    
+    <!-- Google AdSense Section -->
+    <div class="section">
+        <h2>Google AdSense</h2>
+        <p>Desktop - All Sizes</p>
+    </div>
+    
+    <hr>
+    
+    <!-- Adsterra Section -->
+    <div class="section">
+        <h3>A. Adsterra</h3>
+        <p>Desktop - All Sizes</p>
+        
+        <!-- Main Ad Container -->
+        <div id="adContainer">
+            <!-- Default Ad Row -->
+            <div class="ad-row">
+                <div class="input-group">
+                    <label>Zone ID:</label>
+                    <input type="text" name="zone_id[]" value="28056701" placeholder="Enter Zone ID">
+                </div>
+                
+                <div class="input-group">
+                    <label>Placement Domain:</label>
+                    <input type="text" name="placement_domain[]" value="0-2ur0g1a2cgsej.janeway.replit.dev" placeholder="Enter Placement Domain">
+                </div>
+                
+                <div class="ad-size-section">
+                    <div class="size-options">
+                        <select name="ad_size[]">
+                            <option value="300x250">300x250</option>
+                            <option value="728x90">728x90</option>
+                            <option value="160x600">160x600</option>
+                            <option value="320x50">320x50</option>
+                        </select>
+                        
+                        <select name="ad_type[]">
+                            <option value="iframe">Iframe Sync</option>
+                            <option value="banner">Banner</option>
+                            <option value="popunder">Popunder</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <!-- Remove Button for each row -->
+                <button type="button" class="remove-btn" onclick="removeAdRow(this)" style="display:none;">×</button>
+            </div>
+        </div>
+        
+        <!-- Add More Ads Button -->
+        <button type="button" id="addMoreAds" class="add-more-btn">+ Add More Ads</button>
+    </div>
+    
+    <hr>
+    
+    <button type="submit" class="save-btn">Save Device Ads</button>
+</div>
+```
+
+CSS Styling:
+
+```css
+.ad-row {
+    border: 1px solid #ddd;
+    padding: 15px;
+    margin: 10px 0;
+    border-radius: 5px;
+    position: relative;
+}
+
+.input-group {
+    margin: 10px 0;
+}
+
+.input-group label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: bold;
+}
+
+.input-group input, .size-options select {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+}
+
+.size-options {
+    display: flex;
+    gap: 10px;
+    margin: 10px 0;
+}
+
+.size-options select {
+    flex: 1;
+}
+
+.add-more-btn {
+    background: #28a745;
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 5px;
+    cursor: pointer;
+    margin-top: 10px;
+}
+
+.remove-btn {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    background: #dc3545;
+    color: white;
+    border: none;
+    border-radius: 50%;
+    width: 25px;
+    height: 25px;
+    cursor: pointer;
+}
+
+.save-btn {
+    background: #007bff;
+    color: white;
+    border: none;
+    padding: 12px 30px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 16px;
+}
+```
+
+JavaScript Functionality:
+
+```javascript
+// Add more ads functionality
+document.getElementById('addMoreAds').addEventListener('click', function() {
+    const adContainer = document.getElementById('adContainer');
+    const newAdRow = document.createElement('div');
+    newAdRow.className = 'ad-row';
+    
+    newAdRow.innerHTML = `
+        <div class="input-group">
+            <label>Zone ID:</label>
+            <input type="text" name="zone_id[]" placeholder="Enter Zone ID">
+        </div>
+        
+        <div class="input-group">
+            <label>Placement Domain:</label>
+            <input type="text" name="placement_domain[]" placeholder="Enter Placement Domain">
+        </div>
+        
+        <div class="ad-size-section">
+            <div class="size-options">
+                <select name="ad_size[]">
+                    <option value="300x250">300x250</option>
+                    <option value="728x90">728x90</option>
+                    <option value="160x600">160x600</option>
+                    <option value="320x50">320x50</option>
+                </select>
+                
+                <select name="ad_type[]">
+                    <option value="iframe">Iframe Sync</option>
+                    <option value="banner">Banner</option>
+                    <option value="popunder">Popunder</option>
+                </select>
+            </div>
+        </div>
+        
+        <button type="button" class="remove-btn" onclick="removeAdRow(this)">×</button>
+    `;
+    
+    adContainer.appendChild(newAdRow);
+});
+
+// Remove ad row function
+function removeAdRow(button) {
+    const adRow = button.closest('.ad-row');
+    if (document.querySelectorAll('.ad-row').length > 1) {
+        adRow.remove();
+    } else {
+        alert('You must have at least one ad configuration!');
+    }
+}
+
+// Show remove button on first row when multiple rows exist
+document.getElementById('addMoreAds').addEventListener('click', function() {
+    document.querySelectorAll('.remove-btn').forEach(btn => {
+        btn.style.display = 'block';
+    });
+});
+```
+
+Now you can add as many ads as you want using the + Add More Ads button, and each ad row will have a × remove button too!

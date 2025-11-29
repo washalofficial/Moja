@@ -1,3 +1,5 @@
+export type SyncMode = 'preserve_structure' | 'root_sync' | 'path_wise' | 'mirror' | 'smart_detect';
+
 export interface SyncConfig {
   token: string;
   repoUrl: string;
@@ -5,6 +7,7 @@ export interface SyncConfig {
   targetPath: string;
   deleteMissing: boolean;
   autoCommitMessage: boolean;
+  syncMode?: SyncMode;
 }
 
 export interface LogEntry {

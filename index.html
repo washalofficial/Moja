@@ -2,12 +2,119 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>GitSync Mobile</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#4f46e5" />
+    
+    <!-- SEO Meta Tags -->
+    <meta name="description" content="GitSync Mobile - Sync local folders directly to GitHub repositories while preserving directory structure. No wrapper folders, smart file sync, AI-powered commit messages, and PWA support." />
+    <meta name="keywords" content="github sync, folder sync, file synchronization, github repository, github api, file upload, PWA, progressive web app, developer tools" />
+    <meta name="author" content="GitSync Mobile" />
+    <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1" />
+    <meta name="language" content="English" />
+    <meta name="revisit-after" content="7 days" />
+    <meta name="googlebot" content="index, follow" />
+    
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://gitsync-mobile-plus-pc.vercel.app/" />
+    <meta property="og:title" content="GitSync Mobile - GitHub File Sync Tool" />
+    <meta property="og:description" content="Sync your local folders directly to GitHub repositories with smart synchronization and no wrapper folders. Works on desktop, mobile, iOS, and Android." />
+    <meta property="og:image" content="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1200 630'><rect fill='%234f46e5' width='1200' height='630'/><text x='600' y='315' font-size='120' fill='white' text-anchor='middle' dominant-baseline='middle' font-family='system-ui' font-weight='bold'>GitSync Mobile</text></svg>" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:site_name" content="GitSync Mobile" />
+    <meta property="og:locale" content="en_US" />
+    
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="GitSync Mobile - GitHub File Sync Tool" />
+    <meta name="twitter:description" content="Sync local folders to GitHub without wrapper folders. Smart sync, AI commit messages, PWA installation." />
+    <meta name="twitter:image" content="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1200 630'><rect fill='%234f46e5' width='1200' height='630'/><text x='600' y='315' font-size='120' fill='white' text-anchor='middle' dominant-baseline='middle' font-family='system-ui' font-weight='bold'>GitSync Mobile</text></svg>" />
+    <meta name="twitter:creator" content="@GitSyncMobile" />
+    
+    <!-- Mobile Web App Meta Tags -->
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="GitSync" />
+    <meta name="apple-mobile-web-app-status-bar" content="default" />
+    
+    <!-- Links -->
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect fill='%234f46e5' width='192' height='192' rx='45'/><text x='50%' y='50%' font-size='100' fill='white' text-anchor='middle' dominant-baseline='middle' font-family='system-ui' font-weight='bold'>GS</text></svg>" />
+    <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'><rect fill='%234f46e5' width='180' height='180' rx='40'/><text x='50%' y='50%' font-size='90' fill='white' text-anchor='middle' dominant-baseline='middle' font-family='system-ui' font-weight='bold'>GS</text></svg>" />
+    <link rel="canonical" href="https://gitsync-mobile-plus-pc.vercel.app/" />
+    <link rel="alternate" hreflang="en" href="https://gitsync-mobile-plus-pc.vercel.app/" />
+    
+    <title>GitSync Mobile - Sync Folders to GitHub | No Wrapper Folders</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- JSON-LD Structured Data -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebApplication",
+      "name": "GitSync Mobile",
+      "description": "A powerful, mobile-first web tool to sync local folders directly to GitHub repositories while preserving directory structure without creating wrapper folders",
+      "url": "https://gitsync-mobile-plus-pc.vercel.app/",
+      "applicationCategory": "DeveloperApplication",
+      "softwareVersion": "1.0",
+      "operatingSystem": ["Web", "Android", "iOS", "Windows", "macOS", "Linux"],
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+      },
+      "author": {
+        "@type": "Organization",
+        "name": "GitSync Mobile"
+      },
+      "image": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect fill='%234f46e5' width='192' height='192' rx='45'/><text x='50%' y='50%' font-size='100' fill='white' text-anchor='middle' dominant-baseline='middle' font-family='system-ui' font-weight='bold'>GS</text></svg>",
+      "features": [
+        "GitHub Integration",
+        "Folder Synchronization",
+        "PWA Installation",
+        "Mobile Support",
+        "AI Commit Messages",
+        "GitHub LFS Support",
+        "Smart File Sync",
+        "Privacy-Focused"
+      ],
+      "potentialAction": {
+        "@type": "UseAction",
+        "target": "https://gitsync-mobile-plus-pc.vercel.app/"
+      }
+    }
+    </script>
+    
+    <!-- Organization Schema -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Organization",
+      "name": "GitSync Mobile",
+      "url": "https://gitsync-mobile-plus-pc.vercel.app/",
+      "logo": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect fill='%234f46e5' width='192' height='192' rx='45'/><text x='50%' y='50%' font-size='100' fill='white' text-anchor='middle' dominant-baseline='middle' font-family='system-ui' font-weight='bold'>GS</text></svg>",
+      "description": "GitSync Mobile - A powerful mobile-first web tool for syncing folders to GitHub repositories",
+      "contactPoint": {
+        "@type": "ContactPoint",
+        "contactType": "Customer Support",
+        "email": "support@gitsyncmobile.com"
+      }
+    }
+    </script>
   </head>
   <body class="bg-slate-950 text-slate-200 antialiased selection:bg-indigo-500 selection:text-white">
     <div id="root"></div>
     <script type="module" src="/index.tsx"></script>
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js').catch(() => {
+            // Service worker registration failed - app still works
+          });
+        });
+      }
+    </script>
   </body>
 </html>

@@ -5,10 +5,65 @@ export const sanitizeGitPath = (path: string): string => {
     .replace(/^\/+/, '')
     .replace(/\/+$/, '')
     .split('/')
-    .filter(part => part && part !== '.' && part !== '..')
+    .map(part => {
+      if (!part || part === '.' || part === '..') return null;
+      return part
+        .replace(/[\x00-\x1f\x7f]/g, '')
+        .replace(/[^\w.\-\u0080-\uffff]/g, '_')
+        .replace(/_+/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .replace(/^\.+/, '')
+        .trim();
+    })
+    .filter((part): part is string => part !== null && part.length > 0)
     .join('/');
   
+  if (!cleanPath) return 'file';
   return cleanPath;
+};
+
+export const validateGitPath = (path: string): { valid: boolean; error?: string } => {
+  if (!path) return { valid: false, error: 'Path is empty' };
+  if (path.includes('//')) return { valid: false, error: 'Path contains double slashes' };
+  if (path.startsWith('/') || path.endsWith('/')) return { valid: false, error: 'Path has leading/trailing slashes' };
+  if (path.length > 1000) return { valid: false, error: 'Path exceeds maximum length' };
+  
+  const parts = path.split('/');
+  for (const part of parts) {
+    if (!part) return { valid: false, error: 'Path has empty components' };
+    if (/[\x00-\x1f]/.test(part)) return { valid: false, error: 'Path contains control characters' };
+    if (part.length > 255) return { valid: false, error: 'Path component exceeds GitHub limit' };
+  }
+  
+  return { valid: true };
+};
+
+export const validateFileSize = (file: File): { valid: boolean; error?: string; sizeMB: number } => {
+  const sizeMB = file.size / (1024 * 1024);
+  const SOFT_LIMIT_MB = 100;
+  const HARD_LIMIT_MB = 500;
+  
+  if (file.size === 0) {
+    return { valid: false, error: 'File is empty', sizeMB };
+  }
+  
+  if (sizeMB > HARD_LIMIT_MB) {
+    return { valid: false, error: `File exceeds GitHub limit (${HARD_LIMIT_MB}MB max)`, sizeMB };
+  }
+  
+  if (sizeMB > SOFT_LIMIT_MB) {
+    return { valid: true, error: `⚠️ Large file (${sizeMB.toFixed(1)}MB) - GitHub recommends max 100MB`, sizeMB };
+  }
+  
+  return { valid: true, sizeMB };
+};
+
+export const formatFileSize = (bytes: number): string => {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i];
 };
 
 export const readFileAsBase64 = (file: File): Promise<string> => {

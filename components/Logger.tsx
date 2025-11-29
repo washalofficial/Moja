@@ -4,9 +4,10 @@ import { LogEntry } from '../types';
 
 interface LoggerProps {
   logs: LogEntry[];
+  hasError?: boolean;
 }
 
-export const Logger: React.FC<LoggerProps> = ({ logs }) => {
+export const Logger: React.FC<LoggerProps> = ({ logs, hasError = false }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = useState(false);
 
