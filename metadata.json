@@ -1,0 +1,5 @@
+{
+  "name": "GitSync Mobile",
+  "description": "A powerful, mobile-first web tool to sync local folders directly to GitHub repositories while preserving directory structure.",
+  "requestFramePermissions": []
+}
