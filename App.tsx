@@ -10,6 +10,7 @@ import { TermsOfServiceModal } from './components/TermsOfServiceModal';
 import { ConsentBanner } from './components/ConsentBanner';
 import { ScriptInjector } from './components/ScriptInjector';
 import { AdIframe } from './components/AdIframe';
+import { PopunderAd } from './components/PopunderAd';
 import { 
   FolderGit2, 
   Github, 
@@ -65,6 +66,8 @@ const App: React.FC = () => {
   const [showAdminLogin, setShowAdminLogin] = useState(false);
   const [showAdminPanel, setShowAdminPanel] = useState(false);
   const [adminPasswordInput, setAdminPasswordInput] = useState('');
+  const [showImportAdsModal, setShowImportAdsModal] = useState(false);
+  const [importAdsInput, setImportAdsInput] = useState('');
 
   const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
@@ -74,6 +77,8 @@ const App: React.FC = () => {
   const [showHelpModal, setShowHelpModal] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
   const [copySuccess, setCopySuccess] = useState(false);
+  const [showPopunder, setShowPopunder] = useState(false);
+  const [pendingExit, setPendingExit] = useState(false);
   
   const [hasConsent, setHasConsent] = useState(
     !!localStorage.getItem('privacy_consent') && 
@@ -93,7 +98,6 @@ const App: React.FC = () => {
 
   const [files, setFiles] = useState<FileToSync[]>([]);
   const [rootFolderName, setRootFolderName] = useState('');
-  const [syncState, setSyncState] = useState<SyncState>(SyncState.IDLE);
   const [progress, setProgress] = useState(0);
   const [stats, setStats] = useState({ total: 0, scanned: 0, uploaded: 0 });
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -181,6 +185,34 @@ const App: React.FC = () => {
   });
 
   const [adsRefreshTrigger, setAdsRefreshTrigger] = useState(0);
+  const [syncState, setSyncState] = useState<SyncState>(SyncState.IDLE);
+
+  // Scroll to top when sync page opens
+  useEffect(() => {
+    if (syncState !== SyncState.IDLE) {
+      window.scrollTo(0, 0);
+    }
+  }, [syncState]);
+
+  // Load ads from backend (all users see same ads)
+  useEffect(() => {
+    const loadAdsFromBackend = async () => {
+      try {
+        const response = await fetch('/api/ads');
+        if (response.ok) {
+          const adsFromServer = await response.json();
+          if (Object.keys(adsFromServer).length > 0) {
+            setPlacementAds(adsFromServer);
+            localStorage.setItem('placement_ads_config', JSON.stringify(adsFromServer));
+          }
+        }
+      } catch (error) {
+        console.log('Backend ads not available, using localStorage');
+      }
+    };
+    loadAdsFromBackend();
+  }, []);
+
   const [showLocationSelector, setShowLocationSelector] = useState(false);
   const [pendingSave, setPendingSave] = useState<{ type: string; data: any } | null>(null);
   const [expandedPlacement, setExpandedPlacement] = useState<string | null>(null);
@@ -1447,8 +1479,8 @@ const App: React.FC = () => {
 
   if (syncState !== SyncState.IDLE) {
     return (
-      <div className="min-h-screen bg-black text-slate-200 font-sans p-4 flex flex-col items-center">
-        <div className="w-full max-w-3xl flex-1 flex flex-col">
+      <div className="min-h-screen bg-black text-slate-200 font-sans p-4 flex flex-col items-center overflow-y-auto">
+        <div className="w-full max-w-3xl flex flex-col">
           
           <div className="mb-6 mt-2">
             <div className="flex items-center gap-3 mb-2">
@@ -1495,13 +1527,85 @@ const App: React.FC = () => {
             <p className="text-xs text-slate-500 mt-1.5 text-right">{progress}%</p>
           </div>
 
-          <div className="grid grid-cols-3 gap-3 mb-6">
+          <div className="grid grid-cols-3 gap-3 mb-4">
             <StatCard label="Total" value={stats.total} />
             <StatCard label="Scanned" value={stats.scanned} />
             <StatCard label="Uploaded" value={stats.uploaded} />
           </div>
 
+          {/* TOP BANNER AD - FAST LOAD */}
+          {(placementAds['topBanner']?.adsterra?.rawScript || placementAds['topBanner']?.adsterra?.zoneId) && (
+            <div className="w-full flex justify-center my-2">
+              {placementAds['topBanner']?.adsterra?.rawScript ? (
+                <AdIframe html={placementAds['topBanner'].adsterra.rawScript} placementId="sync-top" width={320} height={100} />
+              ) : (
+                <AsterraAdFrame 
+                  zoneId={placementAds['topBanner'].adsterra.zoneId} 
+                  size={placementAds['topBanner'].adsterra.size} 
+                  width={320} 
+                  height={100}
+                />
+              )}
+            </div>
+          )}
+
+          {/* NATIVE BANNER AD - FAST LOAD */}
+          {(placementAds['nativeBanner']?.adsterra?.rawScript || placementAds['nativeBanner']?.adsterra?.zoneId) && (
+            <div className="w-full flex justify-center my-2">
+              {placementAds['nativeBanner']?.adsterra?.rawScript ? (
+                <AdIframe html={placementAds['nativeBanner'].adsterra.rawScript} placementId="sync-native" width={320} height={100} />
+              ) : (
+                <AsterraAdFrame 
+                  zoneId={placementAds['nativeBanner'].adsterra.zoneId} 
+                  size={placementAds['nativeBanner'].adsterra.size} 
+                  width={320} 
+                  height={100}
+                />
+              )}
+            </div>
+          )}
+
           <Logger logs={logs} hasError={hasError} />
+
+          {/* RECTANGLE ADS - FAST LOAD AFTER TERMINAL */}
+          {(placementAds['rectangle1']?.adsterra?.rawScript || placementAds['rectangle1']?.adsterra?.zoneId || 
+            placementAds['rectangle2']?.adsterra?.rawScript || placementAds['rectangle2']?.adsterra?.zoneId) && (
+            <div className="w-full my-3">
+              <TwinRectangles />
+            </div>
+          )}
+
+          {/* GAP AD AFTER TERMINAL - FAST LOAD */}
+          {(placementAds['gapAds']?.adsterra?.rawScript || placementAds['gapAds']?.adsterra?.zoneId) && (
+            <div className="w-full flex justify-center my-2">
+              {placementAds['gapAds']?.adsterra?.rawScript ? (
+                <AdIframe html={placementAds['gapAds'].adsterra.rawScript} placementId="sync-gap" width={320} height={100} />
+              ) : (
+                <AsterraAdFrame 
+                  zoneId={placementAds['gapAds'].adsterra.zoneId} 
+                  size={placementAds['gapAds'].adsterra.size} 
+                  width={320} 
+                  height={100}
+                />
+              )}
+            </div>
+          )}
+
+          {/* BOTTOM BANNER AD - FAST LOAD */}
+          {(placementAds['bottomBanner']?.adsterra?.rawScript || placementAds['bottomBanner']?.adsterra?.zoneId) && (
+            <div className="w-full flex justify-center my-2">
+              {placementAds['bottomBanner']?.adsterra?.rawScript ? (
+                <AdIframe html={placementAds['bottomBanner'].adsterra.rawScript} placementId="sync-bottom" width={320} height={100} />
+              ) : (
+                <AsterraAdFrame 
+                  zoneId={placementAds['bottomBanner'].adsterra.zoneId} 
+                  size={placementAds['bottomBanner'].adsterra.size} 
+                  width={320} 
+                  height={100}
+                />
+              )}
+            </div>
+          )}
 
           {(syncState === SyncState.SUCCESS || syncState === SyncState.ERROR) && (
             <button 
@@ -1588,15 +1692,37 @@ const App: React.FC = () => {
 
                 <div className="flex gap-2">
                   <button 
-                    onClick={() => {
+                    onClick={async () => {
                       const script = placementAds[loc.key]?.adsterra?.rawScript || '';
                       if (!script.trim()) {
                         alert('Please paste a script first');
                         return;
                       }
-                      localStorage.setItem('placement_ads_config', JSON.stringify(placementAds));
-                      setAdsRefreshTrigger(prev => prev + 1);
-                      alert(`Ad saved to ${loc.label}!`);
+                      try {
+                        const response = await fetch('/api/ads/save', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            password: adminPasswordInput,
+                            placement_key: loc.key,
+                            ad_config: placementAds[loc.key]
+                          })
+                        });
+                        if (response.ok) {
+                          localStorage.setItem('placement_ads_config', JSON.stringify(placementAds));
+                          setAdsRefreshTrigger(prev => prev + 1);
+                          alert(`✅ Ad saved to ${loc.label}! All users will see this.`);
+                        } else if (response.status === 429) {
+                          alert(`⛔ Too many failed attempts! Your IP is locked out for 15 minutes for security.`);
+                        } else {
+                          const error = await response.json();
+                          alert(`❌ Error: ${error.error}`);
+                        }
+                      } catch (e) {
+                        alert('Backend unavailable - saving locally only');
+                        localStorage.setItem('placement_ads_config', JSON.stringify(placementAds));
+                        setAdsRefreshTrigger(prev => prev + 1);
+                      }
                     }}
                     className="flex-1 bg-amber-600 hover:bg-amber-500 text-white py-2 rounded-lg font-medium text-sm"
                   >
@@ -1604,15 +1730,41 @@ const App: React.FC = () => {
                   </button>
                   {placementAds[loc.key]?.adsterra?.rawScript && (
                     <button 
-                      onClick={() => {
-                        const updated = { ...placementAds };
-                        if (updated[loc.key]?.adsterra) {
-                          updated[loc.key].adsterra!.rawScript = undefined;
+                      onClick={async () => {
+                        try {
+                          const response = await fetch('/api/ads/delete', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                              password: adminPasswordInput,
+                              placement_key: loc.key
+                            })
+                          });
+                          if (response.ok) {
+                            const updated = { ...placementAds };
+                            if (updated[loc.key]?.adsterra) {
+                              updated[loc.key].adsterra!.rawScript = undefined;
+                            }
+                            localStorage.setItem('placement_ads_config', JSON.stringify(updated));
+                            setPlacementAds(updated);
+                            setAdsRefreshTrigger(prev => prev + 1);
+                            alert(`✅ Ad removed from ${loc.label}!`);
+                          } else if (response.status === 429) {
+                            alert(`⛔ Too many failed attempts! Your IP is locked out for 15 minutes for security.`);
+                          } else {
+                            const error = await response.json();
+                            alert(`❌ Error: ${error.error}`);
+                          }
+                        } catch (e) {
+                          alert('Backend unavailable - removing locally only');
+                          const updated = { ...placementAds };
+                          if (updated[loc.key]?.adsterra) {
+                            updated[loc.key].adsterra!.rawScript = undefined;
+                          }
+                          localStorage.setItem('placement_ads_config', JSON.stringify(updated));
+                          setPlacementAds(updated);
+                          setAdsRefreshTrigger(prev => prev + 1);
                         }
-                        localStorage.setItem('placement_ads_config', JSON.stringify(updated));
-                        setPlacementAds(updated);
-                        setAdsRefreshTrigger(prev => prev + 1);
-                        alert(`Ad removed from ${loc.label}`);
                       }}
                       className="px-4 bg-red-600 hover:bg-red-500 text-white py-2 rounded-lg font-medium text-sm"
                     >
@@ -1648,7 +1800,7 @@ const App: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-black text-slate-200 font-sans flex flex-col" onClick={() => {
+    <div className="min-h-screen bg-black text-slate-200 font-sans flex flex-col overflow-y-auto" onClick={() => {
       if (placementAds['popunder']?.adsterra?.rawScript) {
         const script = placementAds['popunder'].adsterra.rawScript;
         if (script && !sessionStorage.getItem('popunder_shown')) {
@@ -2322,6 +2474,11 @@ const App: React.FC = () => {
                         ) : null}
                       </div>
                     )}
+
+                    {/* NATIVE BANNER AD - BELOW TERMINAL OUTPUT */}
+                    <div className="w-full flex justify-center py-2 my-2">
+                      <AdNativeBanner label="Native Ad" placementKey="nativeBanner" />
+                    </div>
                   </div>
                 )}
               </div>
@@ -2331,7 +2488,6 @@ const App: React.FC = () => {
 
         <div className="mt-6 border-t border-slate-800 pt-6">
            <TwinRectangles />
-           <AdNativeBanner label="Footer Native" placementKey="nativeBanner" />
            
            {/* BOTTOM BANNER AD */}
            {(placementAds['bottomBanner']?.adsterra?.rawScript || placementAds['bottomBanner']?.adsterra?.zoneId) && (
