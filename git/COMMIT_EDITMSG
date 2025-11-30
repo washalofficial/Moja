@@ -1,9 +1,9 @@
-Improve ad script execution to fix display issues
+Isolate ads in iframes to allow simultaneous display
 
-Refactor ad rendering logic to use a new ScriptInjector component, resolving conflicts caused by multiple instances of the same ad script and ensuring ads display correctly across various placements.
+Replaces ScriptInjector with AdIframe component to isolate ad scripts within iframes, preventing global variable conflicts and enabling all ad placements to load and run concurrently.
 
 Replit-Commit-Author: Agent
 Replit-Commit-Session-Id: 031f474f-ad10-416c-9d4d-536da8f222d0
 Replit-Commit-Checkpoint-Type: full_checkpoint
-Replit-Commit-Event-Id: ff8b4a05-4a3c-42dd-9017-9da2207dd87d
-Replit-Commit-Screenshot-Url: https://storage.googleapis.com/screenshot-production-us-central1/256d09e9-c1ce-458d-8c4e-6e1922700cb1/031f474f-ad10-416c-9d4d-536da8f222d0/yMjKbCk
+Replit-Commit-Event-Id: b74fcea5-57f6-42ec-bb13-5ea3652fb7c8
+Replit-Commit-Screenshot-Url: https://storage.googleapis.com/screenshot-production-us-central1/256d09e9-c1ce-458d-8c4e-6e1922700cb1/031f474f-ad10-416c-9d4d-536da8f222d0/5c6SywS

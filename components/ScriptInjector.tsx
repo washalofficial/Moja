@@ -3,13 +3,17 @@ import React, { useEffect, useRef } from 'react';
 interface ScriptInjectorProps {
   html: string;
   className?: string;
+  placementId?: string;
 }
 
-export const ScriptInjector: React.FC<ScriptInjectorProps> = ({ html, className = '' }) => {
+export const ScriptInjector: React.FC<ScriptInjectorProps> = ({ html, className = '', placementId = '' }) => {
   const containerRef = useRef<HTMLDivElement>(null);
+  const uniqueId = useRef(`ad-${Math.random().toString(36).substr(2, 12)}`);
+  const loadedRef = useRef(false);
 
   useEffect(() => {
-    if (!containerRef.current || !html) return;
+    if (!containerRef.current || !html || loadedRef.current) return;
+    loadedRef.current = true;
 
     // Clear previous content
     containerRef.current.innerHTML = '';
@@ -18,44 +22,62 @@ export const ScriptInjector: React.FC<ScriptInjectorProps> = ({ html, className 
     const temp = document.createElement('div');
     temp.innerHTML = html;
 
-    // Process all nodes
-    const processNodes = (nodes: NodeList, target: HTMLElement) => {
-      nodes.forEach(node => {
-        if (node.nodeType === Node.ELEMENT_NODE) {
-          const elem = node as HTMLElement;
-          
-          if (elem.tagName === 'SCRIPT') {
-            // Create a new script element
-            const script = document.createElement('script');
-            script.type = elem.getAttribute('type') || 'text/javascript';
-            
-            // Copy attributes
-            Array.from(elem.attributes).forEach(attr => {
-              if (attr.name !== 'type') {
-                script.setAttribute(attr.name, attr.value);
-              }
-            });
-            
-            // Copy content for inline scripts
-            if (elem.textContent) {
-              script.textContent = elem.textContent;
-            }
-            
-            target.appendChild(script);
-          } else {
-            // Clone non-script elements
-            const clone = elem.cloneNode(false) as HTMLElement;
-            processNodes(elem.childNodes, clone);
-            target.appendChild(clone);
+    // Extract scripts
+    const scripts = Array.from(temp.querySelectorAll('script'));
+    const inlineScripts: string[] = [];
+    const externalScripts: { src: string; attrs: Record<string, string> }[] = [];
+
+    scripts.forEach(script => {
+      if (script.src) {
+        const attrs: Record<string, string> = {};
+        Array.from(script.attributes).forEach(attr => {
+          if (attr.name !== 'src' && attr.name !== 'type') {
+            attrs[attr.name] = attr.value;
           }
-        } else if (node.nodeType === Node.TEXT_NODE) {
-          target.appendChild(node.cloneNode(true));
+        });
+        externalScripts.push({ src: script.src, attrs });
+      } else if (script.textContent) {
+        inlineScripts.push(script.textContent);
+      }
+    });
+
+    if (containerRef.current) {
+      // Add non-script HTML first
+      Array.from(temp.childNodes).forEach(node => {
+        if ((node as any).tagName !== 'SCRIPT' && node.nodeType === Node.ELEMENT_NODE) {
+          const clone = (node as HTMLElement).cloneNode(true);
+          containerRef.current?.appendChild(clone);
         }
       });
-    };
 
-    processNodes(temp.childNodes, containerRef.current);
-  }, [html]);
+      // Execute inline scripts immediately (no delay for parallel loading)
+      inlineScripts.forEach((content, index) => {
+        const newScript = document.createElement('script');
+        newScript.type = 'text/javascript';
+        newScript.textContent = content;
+        containerRef.current?.appendChild(newScript);
+      });
 
-  return <div ref={containerRef} className={className} />;
+      // Execute external scripts immediately after (still in parallel, just queued)
+      externalScripts.forEach((script, index) => {
+        const newScript = document.createElement('script');
+        newScript.type = 'text/javascript';
+        newScript.async = true;
+        Object.entries(script.attrs).forEach(([key, value]) => {
+          newScript.setAttribute(key, value);
+        });
+        newScript.src = script.src;
+        containerRef.current?.appendChild(newScript);
+      });
+    }
+  }, [html, placementId]);
+
+  return (
+    <div 
+      ref={containerRef} 
+      id={uniqueId.current} 
+      className={className} 
+      style={{ minHeight: '60px', display: 'flex', justifyContent: 'center', alignItems: 'center' }} 
+    />
+  );
 };

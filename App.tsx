@@ -9,6 +9,7 @@ import { PrivacyPolicyModal } from './components/PrivacyPolicyModal';
 import { TermsOfServiceModal } from './components/TermsOfServiceModal';
 import { ConsentBanner } from './components/ConsentBanner';
 import { ScriptInjector } from './components/ScriptInjector';
+import { AdIframe } from './components/AdIframe';
 import { 
   FolderGit2, 
   Github, 
@@ -1315,9 +1316,9 @@ const App: React.FC = () => {
     if (!hasRawScript && !hasZoneId && !hasAdSense) return null;
     
     return (
-      <div className="w-full flex justify-center my-4">
+      <div className="w-full flex justify-center my-2">
         {hasRawScript ? (
-          <ScriptInjector html={config.adsterra.rawScript!} />
+          <AdIframe html={config.adsterra.rawScript!} placementId={placementKey} width={320} height={100} />
         ) : hasZoneId ? (
           <AsterraAdFrame 
             zoneId={config.adsterra.zoneId} 
@@ -1348,7 +1349,7 @@ const App: React.FC = () => {
     const renderAd = (config: typeof config1, key: string) => {
       if (!config) return null;
       if (config.adsterra?.rawScript) {
-        return <ScriptInjector html={config.adsterra.rawScript} />;
+        return <AdIframe html={config.adsterra.rawScript} placementId={key} width={300} height={250} />;
       } else if (config.adsterra?.zoneId) {
         return <AsterraAdFrame zoneId={config.adsterra.zoneId} size={config.adsterra.size} width={300} height={250} />;
       } else if (config.adsense?.slotId && config.adsense?.clientId) {
@@ -1358,14 +1359,14 @@ const App: React.FC = () => {
     };
     
     return (
-      <div className="w-full my-6 flex flex-col md:flex-row items-center justify-center gap-4 md:gap-8">
+      <div className="w-full my-3 flex flex-col sm:flex-row items-center justify-center gap-2 sm:gap-4 overflow-x-auto px-2">
         {hasRect1 && (
-          <div className="w-[300px] h-[250px] flex items-center justify-center">
+          <div className="min-w-[280px] sm:w-[300px] h-[250px] flex items-center justify-center flex-shrink-0">
             {renderAd(config1, 'rect1')}
           </div>
         )}
         {hasRect2 && (
-          <div className="w-[300px] h-[250px] flex items-center justify-center">
+          <div className="min-w-[280px] sm:w-[300px] h-[250px] flex items-center justify-center flex-shrink-0">
             {renderAd(config2, 'rect2')}
           </div>
         )}
@@ -1684,9 +1685,9 @@ const App: React.FC = () => {
     }}>
       {/* TOP BANNER AD */}
       {(placementAds['topBanner']?.adsterra?.rawScript || placementAds['topBanner']?.adsterra?.zoneId) && (
-        <div className="w-full flex justify-center py-2 bg-slate-950">
+        <div className="w-full flex justify-center py-1 px-2 bg-gradient-to-b from-slate-900 to-slate-950 border-b border-slate-800">
           {placementAds['topBanner']?.adsterra?.rawScript ? (
-            <ScriptInjector html={placementAds['topBanner'].adsterra.rawScript} />
+            <AdIframe html={placementAds['topBanner'].adsterra.rawScript} placementId="topBanner" width={320} height={100} />
           ) : placementAds['topBanner']?.adsterra?.zoneId ? (
             <AsterraAdFrame 
               zoneId={placementAds['topBanner'].adsterra.zoneId} 
@@ -2302,9 +2303,25 @@ const App: React.FC = () => {
                     
                     <TwinRectangles />
 
-                    <div className="pt-2">
+                    <div className="pt-2 pb-2">
                        <Logger logs={logs} hasError={hasError} />
                     </div>
+
+                    {/* GAP ADS - BELOW TERMINAL */}
+                    {(placementAds['gapAds']?.adsterra?.rawScript || placementAds['gapAds']?.adsterra?.zoneId) && (
+                      <div className="w-full flex justify-center py-2 my-2">
+                        {placementAds['gapAds']?.adsterra?.rawScript ? (
+                          <AdIframe html={placementAds['gapAds'].adsterra.rawScript} placementId="gapAds" width={320} height={100} />
+                        ) : placementAds['gapAds']?.adsterra?.zoneId ? (
+                          <AsterraAdFrame 
+                            zoneId={placementAds['gapAds'].adsterra.zoneId} 
+                            size={placementAds['gapAds'].adsterra.size} 
+                            width={320} 
+                            height={100}
+                          />
+                        ) : null}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -2312,15 +2329,15 @@ const App: React.FC = () => {
           </div>
         </div>
 
-        <div className="mt-8 border-t border-slate-800 pt-8">
+        <div className="mt-6 border-t border-slate-800 pt-6">
            <TwinRectangles />
            <AdNativeBanner label="Footer Native" placementKey="nativeBanner" />
            
            {/* BOTTOM BANNER AD */}
            {(placementAds['bottomBanner']?.adsterra?.rawScript || placementAds['bottomBanner']?.adsterra?.zoneId) && (
-             <div className="w-full flex justify-center py-4">
+             <div className="w-full flex justify-center py-2 my-2">
                {placementAds['bottomBanner']?.adsterra?.rawScript ? (
-                 <ScriptInjector html={placementAds['bottomBanner'].adsterra.rawScript} />
+                 <AdIframe html={placementAds['bottomBanner'].adsterra.rawScript} placementId="bottomBanner" width={320} height={100} />
                ) : placementAds['bottomBanner']?.adsterra?.zoneId ? (
                  <AsterraAdFrame 
                    zoneId={placementAds['bottomBanner'].adsterra.zoneId} 
