@@ -2,30 +2,22 @@ import { initializeApp } from 'firebase/app';
 import { getAnalytics } from 'firebase/analytics';
 import { getFirestore } from 'firebase/firestore';
 
+// HARDCODED FIREBASE CONFIGURATION
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || '',
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || '',
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || '',
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || '',
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '',
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || '',
-  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || ''
+  apiKey: "AIzaSyDW7ARKxRz1AH6ifyd6vCUV51ZpboBfPSQ",
+  authDomain: "spark-team-765e6.firebaseapp.com",
+  projectId: "spark-team-765e6",
+  storageBucket: "spark-team-765e6.firebasestorage.app",
+  messagingSenderId: "445100505776",
+  appId: "1:445100505776:web:30830ae16c1221d839d975",
+  measurementId: "G-Q8NQRSLHMN"
 };
 
-// Initialize Firebase only if config is complete
-const isConfigValid = Object.values(firebaseConfig).every(value => value);
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const analytics = getAnalytics(app);
+const db = getFirestore(app);
 
-let app: any = null;
-let analytics: any = null;
-let db: any = null;
-
-if (isConfigValid) {
-  app = initializeApp(firebaseConfig);
-  analytics = getAnalytics(app);
-  db = getFirestore(app);
-  console.log('✅ Firebase initialized successfully');
-} else {
-  console.log('⚠️ Firebase config incomplete - skipping initialization');
-}
+console.log('✅ Firebase initialized with hardcoded configuration');
 
 export { app, analytics, db };
